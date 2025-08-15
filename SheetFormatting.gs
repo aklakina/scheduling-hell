@@ -112,9 +112,9 @@ function formatResponseSheet() {
 
           // Create dropdown with emojis for quick selection but allow custom entries
           const rule = SpreadsheetApp.newDataValidation()
-            .requireValueInList(['✅ y', '❌ n', '❓ ?', ''], true)
+            .requireValueInList(['Y', 'N', '?', ''], true)
             .setAllowInvalid(true) // Allow time ranges and custom entries
-            .setHelpText('Quick select: ✅ y (yes), ❌ n (no), ❓ ? (maybe), or enter time range (e.g., 18-22)')
+            .setHelpText('Quick select: Y (yes), N (no), ? (maybe), or enter time range (e.g., 18-22)')
             .build();
 
           playerColumnRange.setDataValidation(rule);

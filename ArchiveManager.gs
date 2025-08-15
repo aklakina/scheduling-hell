@@ -177,4 +177,7 @@ function createFutureDateRows(ss, today) {
   });
 
   Logger.log(`Created ${newDates.length} new date rows up to ${targetEndDate.toLocaleDateString()}.`);
+
+  // Apply formatting to the newly created rows
+  formatResponseSheet();
 }
