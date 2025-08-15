@@ -26,7 +26,10 @@ const CONFIG = {
   shortEventWarningHours: 4,
   // Updated: Auto-scheduling configuration for 2 months ahead including today
   monthsToCreateAhead: 2,     // Always maintain 2 months of future dates including today
-  weeksToKeepBeforeArchive: 1 // Keep last week's data before archiving
+  weeksToKeepBeforeArchive: 1, // Keep last week's data before archiving
+  // Discord webhook configuration
+  discordWebhookUrl: PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK'), // Add your Discord webhook URL here (e.g., "https://discord.com/api/webhooks/...")
+  discordChannelMention: "@everyone" // Change to specific role mention if needed (e.g., "<@&ROLE_ID>")
 };
 // --------------------
 
@@ -259,10 +262,10 @@ function onEditFeedback(e) {
   const rosterLastRow = rosterSheet.getLastRow();
   if (rosterLastRow < 2) return; // No player data
 
-  const rosterData = rosterSheet.getRange(2, 1, rosterLastRow - 1, 3).getValues();
+  const rosterData = rosterSheet.getRange(2, 1, rosterLastRow - 1, 2).getValues();
   const playerInfo = {};
   rosterData.forEach(row => {
-    if (row[0]) playerInfo[row[0]] = { email: row[1], notifications: row[2] };
+    if (row[0]) playerInfo[row[0]] = { discordHandle: row[1] };
   });
   const numPlayers = Object.keys(playerInfo).length;
   if (numPlayers === 0) return;
@@ -357,10 +360,10 @@ function checkAndScheduleEvents() {
   const campaignSheet = ss.getSheetByName(CONFIG.campaignDetailsSheetName);
   if (!campaignSheet) { Logger.log(`Error: Sheet '${CONFIG.campaignDetailsSheetName}' not found.`); return; }
 
-  const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 3).getValues();
+  const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 2).getValues();
   const playerInfo = {};
   rosterData.forEach(row => {
-    if (row[0]) playerInfo[row[0]] = { email: row[1], notifications: row[2] };
+    if (row[0]) playerInfo[row[0]] = { discordHandle: row[1] };
   });
   const numPlayers = Object.keys(playerInfo).length;
   if (numPlayers === 0) { Logger.log("No players found in roster."); return; }
@@ -473,8 +476,38 @@ function checkAndScheduleEvents() {
 
     // If a best event was found, schedule it and update status for the whole week
     if (bestEvent) {
-      createCalendarEvent(bestEvent.date, bestEvent.start, bestEvent.end, eventTitleFromSheet, eventLink, allPlayerNames, playerInfo);
-      responseSheet.getRange(bestEvent.rowIndex, statusColumnIndex).setValue(`Event created on ${today.toLocaleDateString()}`);
+      // --- DISCORD WEBHOOK NOTIFICATION ---
+      try {
+        const webhookUrl = CONFIG.discordWebhookUrl;
+        const channelMention = CONFIG.discordChannelMention;
+
+        if (webhookUrl) {
+          const eventDate = bestEvent.date.toLocaleDateString();
+          const eventTime = bestEvent.start ? ` from ${bestEvent.start.toLocaleTimeString()}` : '';
+          const eventEndTime = bestEvent.end ? ` to ${bestEvent.end.toLocaleTimeString()}` : '';
+          const eventTitle = `${eventTitleFromSheet} - ${eventDate}${eventTime}${eventEndTime}`;
+          const eventLinkMessage = eventLink ? `\nEvent Link: ${eventLink}` : '';
+
+          const payload = JSON.stringify({
+            content: `${channelMention} 🎉 **Event Scheduled**: ${eventTitle}!${eventLinkMessage}`,
+            username: "Scheduler Bot",
+            avatar_url: "https://example.com/bot-avatar.png"
+          });
+
+          const options = {
+            method: "post",
+            contentType: "application/json",
+            payload: payload
+          };
+
+          UrlFetchApp.fetch(webhookUrl, options);
+          Logger.log(`Discord event notification sent: ${eventTitle}`);
+        }
+      } catch (error) {
+        Logger.log(`Error sending Discord event notification: ${error.toString()}`);
+      }
+
+      responseSheet.getRange(bestEvent.rowIndex, statusColumnIndex).setValue(`Event scheduled on ${today.toLocaleDateString()}`);
       Logger.log(`Scheduled best event for week ${week} on ${bestEvent.date.toLocaleDateString()}.`);
 
       // Mark other days in the week as 'Superseded'
@@ -505,8 +538,8 @@ function checkAndScheduleEvents() {
             const responseStr = response ? String(response).trim().toLowerCase() : '';
             if (responseStr === '?' || responseStr === '') {
               const playerName = allPlayerNames[i];
-              if (playerInfo[playerName] && playerInfo[playerName].notifications === true) {
-                globalReminderEmails.add(playerInfo[playerName].email);
+              if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
+                globalReminderEmails.add(playerInfo[playerName].discordHandle);
               }
             }
           });
@@ -516,12 +549,40 @@ function checkAndScheduleEvents() {
   }
 
   // Send consolidated reminders once per participant after processing all weeks
-  if (globalReminderEmails.size > 0 && shouldSendReminders(null, lastRunDate)) {
+  if (globalReminderEmails.size > 0) {
     try {
-      const subject = `Reminder: Please update your availability for upcoming events`;
-      const message = `Hi there,\n\nThis is a friendly reminder to please update your availability for upcoming events in the Google Sheet. We are trying to finalize the schedule for the next few weeks.\n\nThanks!`;
-      [...globalReminderEmails].forEach(email => MailApp.sendEmail(email, subject, message));
-      Logger.log(`Sent consolidated reminders to ${globalReminderEmails.size} participants: ${[...globalReminderEmails].join(', ')}`);
+      // --- DISCORD WEBHOOK REMINDER ---
+      const webhookUrl = CONFIG.discordWebhookUrl;
+      const channelMention = CONFIG.discordChannelMention;
+
+      if (webhookUrl) {
+        // Create Discord mentions for players who need reminders
+        const discordMentions = [];
+        [...globalReminderEmails].forEach(discordId => {
+          if (discordId && discordId.trim() !== '') {
+            discordMentions.push(`<@${discordId}>`);
+          }
+        });
+
+        const mentionText = discordMentions.length > 0 ? discordMentions.join(' ') : channelMention;
+
+        const payload = JSON.stringify({
+          content: `${mentionText} 📅 **Reminder**: Please update your availability for upcoming events in the Google Sheet. We are trying to finalize the schedule for the next few weeks. Thanks!`,
+          username: "Scheduler Bot",
+          avatar_url: "https://example.com/bot-avatar.png" // Optional: Set a custom avatar for the bot
+        });
+
+        const options = {
+          method: "post",
+          contentType: "application/json",
+          payload: payload
+        };
+
+        UrlFetchApp.fetch(webhookUrl, options);
+        Logger.log(`Discord reminder sent to ${globalReminderEmails.size} participants: ${[...globalReminderEmails].join(', ')}`);
+      } else {
+        Logger.log(`Discord webhook URL is not set. Skipping reminder for ${globalReminderEmails.size} participants`);
+      }
 
       // Update status for all reminded rows across all weeks
       for (const week in eventsByWeek) {
@@ -535,7 +596,7 @@ function checkAndScheduleEvents() {
               const responseStr = response ? String(response).trim().toLowerCase() : '';
               if (responseStr === '?' || responseStr === '') {
                 const playerName = allPlayerNames[i];
-                if (playerInfo[playerName] && playerInfo[playerName].notifications === true) {
+                if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
                   hasReminderRecipient = true;
                 }
               }
@@ -548,11 +609,9 @@ function checkAndScheduleEvents() {
         });
       }
     } catch (error) {
-      Logger.log(`Error sending reminder emails: ${error.toString()}`);
-      // Don't update status if emails failed to send
+      Logger.log(`Error sending Discord reminder: ${error.toString()}`);
+      // Don't update status if Discord message failed to send
     }
-  } else if (globalReminderEmails.size > 0) {
-    Logger.log(`Skipped reminders - too soon since last reminder (${globalReminderEmails.size} participants would have been notified)`);
   }
 
   // Update last run date after successful processing
@@ -642,35 +701,41 @@ function calculateIntersection(responses, baseDate) {
 
 
 /**
- * Helper function to create the calendar event.
+ * Helper function to send Discord notifications for scheduled events.
+ * Replaces the calendar event creation functionality.
  */
-function createCalendarEvent(date, start, end, eventTitle, eventLink, allPlayerNames, playerInfo) {
+function sendDiscordEventNotification(date, start, end, eventTitle, eventLink) {
   try {
-    const eventOptions = { description: `Roll20 Link: ${eventLink}` };
-    let calendarEvent;
+    const webhookUrl = CONFIG.discordWebhookUrl;
+    const channelMention = CONFIG.discordChannelMention;
 
-    if (!start || !end) { // All-day event
-      calendarEvent = CalendarApp.getDefaultCalendar().createAllDayEvent(eventTitle, date, eventOptions);
-      Logger.log(`Created all-day event for ${date.toLocaleDateString()}`);
-    } else {
-      calendarEvent = CalendarApp.getDefaultCalendar().createEvent(eventTitle, start, end, eventOptions);
-      Logger.log(`Created event for ${date.toLocaleDateString()} from ${start.toLocaleTimeString()} to ${end.toLocaleTimeString()}`);
+    if (!webhookUrl) {
+      Logger.log(`Discord webhook URL is not set. Skipping event notification.`);
+      return;
     }
 
-    const guestList = [];
-    allPlayerNames.forEach(playerName => {
-      if (playerInfo[playerName] && playerInfo[playerName].notifications === true) {
-        guestList.push(playerInfo[playerName].email);
-      }
+    const eventDate = date.toLocaleDateString();
+    const eventTime = start ? ` from ${start.toLocaleTimeString()}` : '';
+    const eventEndTime = end ? ` to ${end.toLocaleTimeString()}` : '';
+    const fullEventTitle = `${eventTitle} - ${eventDate}${eventTime}${eventEndTime}`;
+    const eventLinkMessage = eventLink ? `\nEvent Link: ${eventLink}` : '';
+
+    const payload = JSON.stringify({
+      content: `${channelMention} 🎉 **Event Scheduled**: ${fullEventTitle}!${eventLinkMessage}`,
+      username: "Scheduler Bot",
+      avatar_url: "https://example.com/bot-avatar.png"
     });
-    if (calendarEvent) {
-      guestList.forEach(guest => { // We have to use foreach, cause addGuests does not exist
-        calendarEvent.addGuest(guest);
-      })
-    }
+
+    const options = {
+      method: "post",
+      contentType: "application/json",
+      payload: payload
+    };
+
+    UrlFetchApp.fetch(webhookUrl, options);
+    Logger.log(`Discord event notification sent: ${fullEventTitle}`);
   } catch (error) {
-    Logger.log(`Error creating calendar event: ${error.toString()}`);
-    throw error; // Re-throw to allow calling function to handle
+    Logger.log(`Error sending Discord event notification: ${error.toString()}`);
   }
 }
 
@@ -746,16 +811,6 @@ function getLastRunDate() {
 function setLastRunDate(date) {
   const scriptProperties = PropertiesService.getScriptProperties();
   scriptProperties.setProperty('LAST_RUN_DATE', date.toISOString());
-}
-
-/**
- * Determines if reminders should be sent for a given week.
- * Reminders are sent if it's been at least 7 days since the last run date.
- */
-function shouldSendReminders(week, lastRunDate) {
-  const today = new Date();
-  const daysSinceLastRun = Math.floor((today - lastRunDate) / (24 * 60 * 60 * 1000));
-  return daysSinceLastRun >= 7;
 }
 
 /**
