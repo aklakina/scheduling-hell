@@ -74,3 +74,56 @@ function setLastRunDate(date) {
   const scriptProperties = PropertiesService.getScriptProperties();
   scriptProperties.setProperty('LAST_RUN_DATE', date.toISOString());
 }
+
+/**
+ * Calculates the processing window for monthly triggers that run on 1st and 16th.
+ * Ensures full month coverage with minimal overlap between windows.
+ *
+ * @param {Date} today - Current date
+ * @returns {Object} Object with processingStartDate and processingEndDate
+ */
+function calculateMonthlyProcessingWindow(today) {
+  const currentDay = today.getDate();
+  const currentMonth = today.getMonth();
+  const currentYear = today.getFullYear();
+
+  // Base processing start: 3 days from today
+  const baseStartDate = new Date(today);
+  baseStartDate.setDate(today.getDate() + 3);
+
+  let processingStartDate, processingEndDate;
+
+  // Determine which trigger we are (1st or 16th) and calculate appropriate window
+  if (currentDay <= 15) {
+    // We're running on the 1st (or close to it)
+    // Cover from 3 days from now until mid-month of next month
+    processingStartDate = new Date(baseStartDate);
+
+    // End date: 15th of next month
+    const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+    const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+    processingEndDate = new Date(nextYear, nextMonth, 15, 23, 59, 59, 999);
+
+  } else {
+    // We're running on the 16th (or close to it)
+    // Cover from 3 days from now until mid-month of the month after next
+    processingStartDate = new Date(baseStartDate);
+
+    // End date: 15th of the month after next
+    let targetMonth = currentMonth + 2;
+    let targetYear = currentYear;
+
+    if (targetMonth > 11) {
+      targetMonth = targetMonth - 12;
+      targetYear++;
+    }
+
+    processingEndDate = new Date(targetYear, targetMonth, 15, 23, 59, 59, 999);
+  }
+
+  return {
+    processingStartDate,
+    processingEndDate,
+    windowDays: Math.ceil((processingEndDate - processingStartDate) / (24 * 60 * 60 * 1000))
+  };
+}

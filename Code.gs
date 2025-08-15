@@ -230,23 +230,14 @@ function checkAndScheduleEvents() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Get last run date from script properties, default to 14 days ago if never run
-  const lastRunDate = getLastRunDate() || new Date(today.getTime() - (14 * 24 * 60 * 60 * 1000));
-
-  // Calculate processing window: start 3 days from now, extend based on time since last run
-  const processingStartDate = new Date(today);
-  processingStartDate.setDate(today.getDate() + 3);
-
-  // For monthly triggers, we need a longer window to ensure we don't miss anything
-  // If it's been more than 14 days since last run, extend the window
-  const daysSinceLastRun = Math.floor((today - lastRunDate) / (24 * 60 * 60 * 1000));
-  const windowDays = Math.max(14, Math.min(35, daysSinceLastRun + 14)); // 14-35 day window
-
-  const processingEndDate = new Date(processingStartDate);
-  processingEndDate.setDate(processingStartDate.getDate() + windowDays);
+  // Calculate processing window based on monthly trigger schedule (1st and 16th)
+  const windowInfo = calculateMonthlyProcessingWindow(today);
+  const processingStartDate = windowInfo.processingStartDate;
+  const processingEndDate = windowInfo.processingEndDate;
+  const windowDays = windowInfo.windowDays;
 
   Logger.log(`Processing window: ${processingStartDate.toLocaleDateString()} to ${processingEndDate.toLocaleDateString()} (${windowDays} days)`);
-  Logger.log(`Days since last run: ${daysSinceLastRun}`);
+  Logger.log(`Current date: ${today.toLocaleDateString()}, trigger type: ${today.getDate() <= 15 ? '1st of month' : '16th of month'}`);
 
   // --- Filter data for the calculated window ---
   const allData = responseSheet.getRange(CONFIG.firstDataRow, 1, responseSheet.getLastRow() - CONFIG.firstDataRow + 1, statusColumnIndex).getValues();
