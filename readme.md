@@ -1,8 +1,16 @@
-# Developer Documentation: Google Sheets Intelligent Scheduler
+# Developer Documentation: Google Sheets Discord Scheduler
 
 ## 1. Architectural Overview
 
-This Google Apps Script employs a dual-trigger, state-driven architecture to manage event scheduling with enhanced monthly trigger support and intelligent reminder consolidation. The system is designed to be robust, efficient, and to minimize API calls, which are subject to daily quotas and performance limitations within the Apps Script environment.
+This Google Apps Script employs a dual-trigger, state-driven architecture to manage event scheduling with **Discord notifications**, automatic archiving, and intelligent player combination analysis. The system is designed to be robust, efficient, and to minimize API calls while providing rich Discord-based notifications for scheduling updates.
+
+### Key System Changes
+
+**MAJOR UPDATE**: This system now uses **Discord webhooks** for all notifications instead of Google Calendar events or email. The system sends Discord messages for:
+- Event scheduling notifications
+- Player reminders (differentiated by response type)
+- Duration restriction warnings
+- Sheet setup notifications
 
 ### State Machine
 
@@ -10,22 +18,25 @@ The primary state management mechanism is the **Status** column within the Googl
 
 ### UI Trigger (onEditFeedback)
 
-A lightweight, synchronous function that runs on every edit. Its sole responsibilities are to provide immediate input validation to the user and to update the state of the edited row in the "Status" column. It performs no external API calls to `MailApp` or `CalendarApp`. This separation is critical to ensure a responsive user experience; a single, monolithic `onEdit` trigger that also handled email and calendar events would be slow, prone to hitting the 30-second execution limit, and could result in redundant API calls if multiple cells are edited in quick succession.
+A lightweight, synchronous function that runs on every edit. Its sole responsibilities are to provide immediate input validation to the user and to update the state of the edited row in the "Status" column. It performs no external API calls to Discord or other services. This separation is critical to ensure a responsive user experience.
 
 **Enhanced Features:**
-- **Roster-aware validation**: Only counts responses from players listed in the "Player Roster" sheet
+- **Roster-aware validation**: Only counts responses from players listed in the "Player Roster" sheet with Discord handles
 - **Advanced time format support**: Handles time formats with seconds (e.g., "18:23:00") and various combinations
 - **Improved status calculation**: Accurately determines "Ready for scheduling" vs "Awaiting responses" based on actual player responses
 
 ### Processing Trigger (checkAndScheduleEvents)
 
-A time-driven, asynchronous function that acts as the main processing engine with enhanced monthly trigger support. It reads the state of all relevant rows, applies the core scheduling and notification logic, and performs all necessary API calls. This batch-processing approach is more efficient and respectful of API quotas.
+A time-driven, asynchronous function that acts as the main processing engine with enhanced monthly trigger support. It reads the state of all relevant rows, applies the core scheduling and notification logic, and performs Discord notifications and automatic data management.
 
 **Enhanced Features:**
 - **Dynamic processing windows**: Adapts window size (14-35 days) based on time since last run
 - **State persistence**: Tracks last run date to prevent gaps in coverage
-- **Consolidated reminder system**: Sends only one email per participant per run, regardless of how many events they need to respond to
-- **Intelligent reminder throttling**: Prevents spam by enforcing minimum 7-day intervals between reminder emails
+- **Discord integration**: Sends targeted Discord notifications instead of emails
+- **Intelligent reminder system**: Differentiated reminders for "maybe" vs "no response" players
+- **Player combination analysis**: Identifies players restricting event duration
+- **Automatic archiving**: Moves old data to archive sheet automatically
+- **Future date generation**: Automatically creates new date rows to maintain 2-month scheduling window
 
 ---
 
@@ -33,282 +44,352 @@ A time-driven, asynchronous function that acts as the main processing engine wit
 
 ### 2.1. Configuration (CONFIG Object)
 
-All magic numbers and sheet identifiers are stored in a global `CONFIG` object. This allows for easy maintenance and adaptation without altering the core logic. Modifying a sheet name or row layout only requires a change in one location.
+All configuration is stored in a global `CONFIG` object in `Config.gs`. This includes:
 
-- **responseSheetName, rosterSheetName, campaignDetailsSheetName**: String identifiers for the required sheets.
-- **headerRow, firstDataRow**: Defines the sheet structure, allowing the script to correctly differentiate between header information and schedulable data. For example, if headers are in row 1, `headerRow` is 1 and `firstDataRow` is 2.
-- **dateColumn, firstPlayerColumn**: Defines the column layout for data parsing.
-- **statusColumnName**: The string header for the state machine column.
-- **minEventDurationHours, shortEventWarningHours**: Business logic parameters for event validation and notifications. These control the core scheduling rules.
+- **Sheet identifiers**: `responseSheetName`, `rosterSheetName`, `campaignDetailsSheetName`, `archiveSheetName`
+- **Layout configuration**: `headerRow`, `firstDataRow`, `dateColumn`, `firstPlayerColumn`
+- **Business logic parameters**: 
+  - `minEventDurationHours` (4 hours) - Minimum for actual scheduling
+  - `minConsiderationDurationHours` (2 hours) - Minimum to consider viable
+  - `reminderThresholdPercentage` (0.4) - % of Y responses needed before sending reminders
+  - `playerCombinationThresholdPercentage` (0.6) - % of players needed for duration notifications
+- **Discord configuration**: Webhook URL, channel mentions, message templates
+- **Automation settings**: Archive threshold, future date creation period
 
-### 2.2. UI Trigger: onEditFeedback(e)
+### 2.2. Discord Integration System
 
-#### Entry Point
+#### Discord Webhook Setup
+The system requires a Discord webhook URL stored in Script Properties under the key `DISCORD_WEBHOOK`. This enables:
 
-Triggered by any `onEdit` event in the spreadsheet.
+1. **Event Notifications**: Rich Discord messages when events are scheduled
+2. **Targeted Reminders**: Separate messages for players who answered "?" vs those who didn't respond
+3. **Duration Warnings**: Notifications to players whose time constraints are limiting event length
+4. **Setup Notifications**: Messages when new scheduling sheets are created
 
-#### Event Object (e)
+#### Player Roster Integration
+The "Player Roster" sheet now requires:
+- **Column A**: Player names (matching response sheet headers)
+- **Column B**: Discord user IDs (for mentions in notifications)
+- **Column C**: Notification preferences (optional, for future use)
 
-Utilizes the `e.range` and `e.value` properties to get the context of the edit.
+### 2.3. UI Trigger: onEditFeedback(e)
 
 #### Execution Flow
+1. **Guard Clauses**: Exits if edit is outside player response area or in system columns
+2. **Roster Integration**: Cross-references with Discord-enabled players only
+3. **Enhanced Input Validation**: Supports extended time formats with real-time feedback
+4. **Intelligent State Analysis**: Processes only actual roster players, ignoring empty columns
+5. **Accurate State Calculation**: Counts responses from Discord-enabled players only
 
-1. **Guard Clauses**: Immediately exits if the edit is outside the designated player response area or is an edit to the Status column itself. This is a crucial performance optimization, preventing the script from executing on irrelevant cell changes.
-2. **Roster Integration**: Cross-references column headers with the "Player Roster" sheet to ensure only actual players' responses are counted.
-3. **Enhanced Input Validation**: For non-standard inputs (i.e., anything other than `y`, `n`, `?`), it calls `parseTimeRange()` to validate the format with support for:
-   - Single times: `18`, `18:30`, `18:30:00`
-   - Time ranges: `18-22`, `18:30-20:00`, `18:30:00-22:00:00`
-   - An invalid format results in a `SpreadsheetApp.getUi().alert()`, providing immediate, actionable feedback to the user.
-4. **Intelligent State Analysis**: After any valid edit, the function reads the entire data for the edited row, but only processes columns corresponding to actual players in the roster.
-5. **Accurate State Calculation**: It tallies the counts of `y`, `?`, `n`, blank, and valid time responses from actual players only. For example, in a 4-player game with empty columns, it ignores those empty columns and only considers the 4 actual player responses.
-6. **State Commit**: Writes the calculated status (e.g., Ready for scheduling, Awaiting responses) to the Status column for that row.
+### 2.4. Processing Trigger: checkAndScheduleEvents()
 
-### 2.3. Processing Trigger: checkAndScheduleEvents()
+#### Enhanced Monthly Processing
+The system now includes sophisticated monthly trigger handling with adaptive windows and comprehensive data management.
 
-This is the primary asynchronous worker function with enhanced monthly trigger support.
+#### Player Combination Analysis
+**NEW FEATURE**: The system analyzes optimal player combinations:
+1. **Restricting Player Detection**: Identifies players whose time constraints limit event duration
+2. **Threshold Analysis**: Checks if 60%+ of players can meet minimum duration
+3. **Targeted Notifications**: Sends Discord messages to players restricting duration
+4. **Optimal Scheduling**: Finds best player combinations for maximum event length
 
-#### Dynamic Time Window Calculation
+#### Discord Notification System
+- **Event Scheduling**: Rich Discord messages with event details and mentions
+- **Differentiated Reminders**: 
+  - "Maybe" reminders for players who answered "?"
+  - "No response" reminders for players who haven't responded
+- **Duration Restrictions**: Targeted messages to players limiting event length
+- **Throttling**: 7-day minimum between reminder campaigns
 
-**NEW FEATURE**: The function now calculates an intelligent processing window based on when it was last run:
-
-1. **First Run**: Defaults to a 14-day window starting 3 days from now
-2. **Regular Runs**: (≤14 days since last): Uses standard 14-day window
-3. **Delayed Runs** (>14 days since last): Extends window up to 35 days to catch up
-4. **State Persistence**: Uses `PropertiesService` to track last run date across executions
-
-This adaptive approach ensures:
-- No events are missed due to irregular monthly trigger timing
-- Complete coverage without excessive overlap
-- Graceful recovery from missed or delayed triggers
-
-#### Data Grouping
-
-1. It filters the rows further, excluding any that have already been successfully processed (e.g., status starts with "Event created" or "Superseded").
-2. The remaining rows are grouped into an `eventsByWeek` object, using `getWeekNumber()` as a key. This is the core of the "weekly analysis" logic, allowing the script to make intelligent decisions for a whole week at once, rather than processing days in isolation.
-
-#### Weekly Processing Loop
-
-1. **Find Best Opportunity**: It iterates through all events in the week with a status of **Ready for scheduling**. For each, it calls `calculateIntersection()` to determine the common availability. The event with the longest resulting duration is flagged as the `bestEvent`. This prioritization of duration is a core business rule designed to maximize session quality.
-2. **Schedule or Handle Failures**:
-   - If `bestEvent` exists: `createCalendarEvent()` is called. The status of the scheduled event's row is updated to **Event created...**. All other rows in that same week are updated to **Superseded...**. This provides clear feedback and prevents those rows from being processed again. The loop then continues to the next week.
-   - If no `bestEvent` exists: The script checks if any events were **Ready for scheduling** but failed the `calculateIntersection()` check (i.e., the common time was too short). If so, their status is updated to **Failed: Duration < 2h**. This is crucial for providing feedback on why an expected event was not scheduled.
-3. **Consolidated Reminder Collection**: **NEW FEATURE**: Instead of sending reminders per week, the system now:
-   - Collects all unique email addresses across ALL weeks in the processing window
-   - Uses a `Set` to ensure each participant is only included once
-   - Sends a single consolidated reminder email per participant per run
-   - Only sends reminders if it's been at least 7 days since the last run
-
-#### Enhanced Reminder System
-
-**MAJOR IMPROVEMENT**: The new reminder system prevents notification fatigue:
-
-- **Global Collection**: Gathers reminder recipients across all weeks in a single `Set`
-- **Deduplication**: Each participant receives at most one email per run
-- **Throttling**: 7-day minimum interval between reminder campaigns
-- **Smart Status Updates**: Only marks rows as "Reminder sent" if their participants actually received emails
+#### Automatic Data Management
+**NEW FEATURES**:
+1. **Auto-Archiving**: Moves old data (older than 1 week) to Archive sheet
+2. **Future Date Creation**: Automatically generates dates for next 2 months
+3. **Sheet Formatting**: Applies comprehensive formatting to both active and archive sheets
 
 ---
 
-## 3. Helper Functions & Algorithms
+## 3. Enhanced Helper Functions & Algorithms
 
-### calculateIntersection(responses, baseDate)
+### 3.1. Player Combination Analysis
 
-**Enhanced with roster-aware logic**:
+#### findOptimalPlayerCombination(responses, allPlayerNames, playerInfo, baseDate)
+Advanced algorithm that:
+1. **Identifies restricting players** whose time constraints are below minimum duration
+2. **Finds optimal combinations** excluding restricting players
+3. **Validates thresholds** ensuring sufficient player participation
+4. **Returns detailed analysis** including duration and restricting player list
 
-1. Initializes an intersection window spanning the entire day (00:00 to 23:59).
-2. Iterates through player responses, now with improved handling for different response types.
-3. **NEW**: Properly distinguishes between all-Y responses (all-day events) and mixed responses.
+#### findRestrictingPlayers(validPlayerResponses, baseDate)
+Specifically identifies players whose individual time constraints fall below the 4-hour minimum event duration, enabling targeted notifications.
 
-#### Return Logic
+### 3.2. Discord Notification Functions
 
-- Returns `{ start: null, end: null }` if all valid players responded `y`. This explicitly signals a valid all-day event.
-- Returns `{ start: Date, end: Date }` for a valid, timed intersection that meets the `minEventDurationHours`.
-- Returns `{ start: undefined, end: undefined }` if the final intersection is invalid (e.g., start time is after end time) or shorter than the minimum duration. This signals an unschedulable event.
+#### sendDiscordEventNotification(date, start, end, eventTitle, eventLink)
+Sends rich Discord messages for scheduled events with:
+- Event title and date formatting
+- Time range information
+- Roll20/meeting links
+- Channel mentions for visibility
 
-### parseTimeRange(timeStr, baseDate)
+#### sendDiscordReminder(reminderEmails, reminderType)
+Sends targeted reminders with type-specific messaging:
+- `'maybe'`: For players who answered "?"
+- `'noResponse'`: For players who haven't responded
+- Prevents spam through deduplication and throttling
 
-**ENHANCED**: Now supports extended time formats with robust validation:
+#### sendDiscordDurationRestrictionNotification(restrictingPlayers, eventDate, optimalDuration, playerInfo)
+Notifies specific players when their time constraints are preventing optimal scheduling.
 
-- **Single times**: `18`, `18:30`, `18:30:00`
-- **Time ranges**: `18-22`, `18:30-20:00`, `18:30:00-22:00:00`
-- **Mixed formats**: `18-20:30`, `18:30-22`
-- Uses two robust regular expressions with non-capturing groups for optional components
-- Validates all time components (hours 0-23, minutes 0-59, seconds 0-59)
-- Single times are automatically converted into 4-hour blocks based on `shortEventWarningHours`
+### 3.3. Archive and Data Management
 
-### getWeekNumber(d)
+#### archiveOldResponses(ss, processingStartDate)
+Automatically moves old response data to Archive sheet:
+- **Threshold-based**: Archives data older than 1 week
+- **Preserves structure**: Maintains formatting and column layout
+- **Batch processing**: Efficient bulk operations
+- **Automatic formatting**: Applies archive-specific styling
 
-A standard helper to get the ISO 8601 week number for a given date. This is critical for ensuring that weekly groupings are consistent and handle year-end transitions correctly.
+#### createFutureDateRows(ss, today)
+Automatically generates future scheduling dates:
+- **2-month window**: Always maintains dates for next 2 months
+- **Daily scheduling**: Creates consecutive daily entries
+- **Formula integration**: Adds day-of-week and "today" indicator formulas
+- **Structure preservation**: Maintains all column formatting and validation
 
-### State Persistence Functions (NEW)
+### 3.4. Enhanced Sheet Formatting
 
-#### getLastRunDate()
-- Retrieves the last execution date from `PropertiesService`
-- Returns `null` if never run before
-- Used to calculate dynamic processing windows
-
-#### setLastRunDate(date)
-- Stores the current execution date in `PropertiesService`
-- Called after successful processing to track execution history
-
-#### shouldSendReminders(week, lastRunDate)
-- Enforces 7-day minimum interval between reminder campaigns
-- Prevents email spam from frequent or overlapping triggers
-
----
-
-## 4. Monthly Trigger Setup & Configuration
-
-### The Challenge
-
-Google Apps Script doesn't support true bi-weekly triggers, only monthly ones. This creates potential gaps in coverage or excessive overlap.
-
-### The Solution
-
-**ENHANCED SYSTEM**: Dynamic processing windows with state persistence.
-
-#### Recommended Monthly Trigger Setup
-
-Set up **two monthly triggers** for optimal coverage:
-
-1. **First Trigger:**
-   - Type: Time-driven
-   - Event source: Month timer  
-   - Day of month: **1st**
-   - Time of day: 9:00 AM (or your preferred time)
-
-2. **Second Trigger:**
-   - Type: Time-driven
-   - Event source: Month timer
-   - Day of month: **15th** 
-   - Time of day: Same time as the first trigger
-
-#### How the Enhanced System Works
-
-1. **Adaptive Windows**: Processing window automatically adjusts from 14-35 days based on time since last run
-2. **Complete Coverage**: Even if one trigger fails, the next run extends its window to compensate
-3. **No Spam**: 7-day minimum between reminder emails prevents notification fatigue
-4. **Fault Tolerance**: System gracefully handles missed or delayed triggers
+#### formatResponseSheet() / formatArchiveSheet()
+Comprehensive formatting systems providing:
+- **Conditional formatting**: Color-coded responses and statuses
+- **Data validation**: Dropdown menus for quick response entry
+- **Column optimization**: Proper widths and alignment
+- **Visual hierarchy**: Clear distinction between data types
+- **Archive styling**: Muted colors for historical data
 
 ---
 
-## 5. Deployment & Maintenance
+## 4. Monthly Trigger System & Discord Setup
 
-### Setup Process
+### 4.1. Discord Webhook Configuration
 
-1. **Install the Script**: Copy the code into a Google Apps Script project bound to your spreadsheet
-2. **Run Setup**: Use the "Scheduler > Setup Sheet" menu item to add the Status column
-3. **Configure Triggers**:
-   - Set up an "On edit" trigger for `onEditFeedback`
-   - Set up two monthly triggers for `checkAndScheduleEvents` (1st and 15th of each month)
-4. **Test**: Use "Scheduler > Run Now" to manually test the system
+#### Required Setup Steps:
+1. **Create Discord Webhook**: In your Discord server, create a webhook for the target channel
+2. **Store Webhook URL**: Add to Script Properties as `DISCORD_WEBHOOK`
+3. **Configure Mentions**: Set `CONFIG.discordChannelMention` to appropriate role or @everyone
+4. **Test Notifications**: Use "Run Now" to verify Discord integration
 
-### Required Sheets Structure
+#### Message Customization:
+All Discord messages are template-based in `CONFIG.messages.discord`:
+- `eventScheduled`: Event notification format
+- `reminder` / `reminderNoResponse`: Different reminder types  
+- `durationRestriction`: Duration warning messages
+- `sheetSetup`: New sheet notifications
+
+### 4.2. Monthly Trigger Configuration
+
+#### Recommended Setup:
+1. **First Trigger**: 1st of each month, 9:00 AM
+2. **Second Trigger**: 16th of each month, same time
+3. **Adaptive Windows**: System automatically adjusts processing window based on timing
+
+#### How It Works:
+- **1st of month trigger**: Processes ~3-45 days ahead (adaptive)
+- **16th of month trigger**: Continues coverage with overlap prevention
+- **State persistence**: Tracks execution history to prevent gaps
+- **Discord throttling**: 7-day minimum between reminder campaigns
+
+---
+
+## 5. Sheet Structure & Setup
+
+### 5.1. Required Sheets
 
 #### "Player Roster" Sheet
-- Column A: Player names (must match column headers in response sheet)
-- Column B: Email addresses
-- Column C: Notification preferences (TRUE/FALSE)
+| Column | Content | Purpose |
+|--------|---------|---------|
+| A | Player Name | Must match response sheet headers exactly |
+| B | Discord User ID | For @mentions in notifications (e.g., "123456789012345678") |
+| C | Notification Preferences | Optional, for future features |
 
-#### "Campaign details" Sheet
-- Cell A2: Event title for calendar events
-- Cell B2: Roll20 or meeting link for event descriptions
+#### "Campaign details" Sheet  
+| Cell | Content | Purpose |
+|------|---------|---------|
+| A2 | Event Title | Used in Discord notifications |
+| B2 | Roll20/Meeting Link | Included in event notifications |
 
-#### Main Response Sheet (e.g., "2025")
-- Column A: Dates
-- Columns C+: Player name headers (matching roster)
-- Last Column: "Status" (added automatically by setup)
+#### "Responses" Sheet (Auto-generated)
+- **Column A**: Dates (auto-generated)
+- **Column B**: Day of week (formula-based)
+- **Columns C+**: Player response columns (from roster)
+- **Today Column**: Shows current date indicator
+- **Status Column**: System-managed status tracking
 
-### Scopes
+#### "Archive" Sheet (Auto-created)
+- **Same structure** as Responses sheet
+- **Historical data** older than 1 week
+- **Muted formatting** for archived content
+- **No "Today" column** (removed during archiving)
 
-The script requires authorization for:
-- `SpreadsheetApp` (read/write)
-- `MailApp` (send email on behalf of the authorizing user)
-- `CalendarApp` (create and modify events in the user's default calendar)
-- `PropertiesService` (store last run date for adaptive windows)
+### 5.2. Setup Process
 
-### Debugging
-
-The enhanced system includes comprehensive logging:
-
-- Processing window calculations and decisions
-- Number of participants who would receive reminders
-- Reminder throttling decisions
-- Calendar event creation details
-- Error handling for API failures
-
-To debug, run `checkAndScheduleEvents` manually from the Apps Script editor and view the logs under "Executions".
+1. **Create Player Roster**: Add player names and Discord IDs
+2. **Create Campaign Details**: Set event title and meeting link
+3. **Run Setup**: Use "Scheduler > Setup Sheet" menu item
+4. **Configure Discord**: Add webhook URL to Script Properties
+5. **Set Triggers**: Configure monthly triggers (1st and 16th)
+6. **Test System**: Use "Scheduler > Run Now" for testing
 
 ---
 
-## 6. Enhanced Features Summary
+## 6. Advanced Features & Enhancements
 
-### What's New
+### 6.1. Player Combination Intelligence
 
-1. **Monthly Trigger Support**: Dynamic processing windows that adapt to irregular trigger timing
-2. **Roster Integration**: Only counts responses from actual players, ignoring empty columns
-3. **Advanced Time Parsing**: Supports seconds and various time format combinations
-4. **Consolidated Reminders**: One email per participant per run, preventing spam
-5. **State Persistence**: Tracks execution history for intelligent decision-making
-6. **Improved Error Handling**: Graceful handling of Google service outages
-7. **Enhanced Logging**: Comprehensive debugging information
-8. **Manual Trigger**: "Run Now" menu item for testing and manual execution
+The system now performs sophisticated analysis to optimize scheduling:
 
-### Performance Improvements
+- **Minimum viable combinations**: Requires 60% of players for duration notifications
+- **Restricting player identification**: Finds players limiting event length
+- **Optimal duration calculation**: Maximizes session length within constraints
+- **Targeted messaging**: Notifies only relevant players about constraints
 
-- **Reduced API Calls**: Consolidated reminder emails
-- **Intelligent Throttling**: Prevents unnecessary reminder campaigns
-- **Roster-Aware Processing**: More accurate status calculations
-- **Fault Tolerance**: Automatic recovery from missed triggers
+### 6.2. Automated Data Lifecycle
 
-### User Experience Enhancements
+**Archive Management**:
+- Automatically moves data older than 1 week to Archive sheet
+- Preserves complete response history
+- Applies specialized formatting for historical data
+- Maintains sheet performance by limiting active data
 
-- **Immediate Validation**: Real-time feedback on time format entries
-- **Transparent Status**: Clear indication of scheduling pipeline state
-- **Flexible Input**: Support for various time formats
-- **Reduced Spam**: Maximum one reminder email per participant per run
-- **Easy Setup**: One-click Status column addition
+**Future Date Generation**:
+- Always maintains 2 months of future dates
+- Creates daily entries with proper formulas
+- Integrates with existing formatting systems
+- Ensures no gaps in scheduling availability
+
+### 6.3. Enhanced User Experience
+
+**Visual Feedback**:
+- Real-time conditional formatting for responses
+- Status-based color coding
+- Data validation with helpful hints
+- Clear visual hierarchy between active and archived data
+
+**Smart Notifications**:
+- Type-specific Discord reminders
+- Threshold-based reminder triggering
+- Duration constraint warnings
+- Setup completion notifications
 
 ---
 
 ## 7. Troubleshooting & Common Issues
 
-### Monthly Triggers Not Working Consistently
+### 7.1. Discord Integration Issues
 
-**Solution**: The enhanced system automatically handles irregular trigger timing. Check the logs to see the adaptive window calculations.
+**Webhook Not Working**:
+- Verify webhook URL in Script Properties under `DISCORD_WEBHOOK`
+- Test webhook with external tool (e.g., curl)
+- Check Discord server permissions
 
-### Players Receiving Multiple Reminder Emails
+**Players Not Getting Mentioned**:
+- Ensure Discord User IDs are correct in Player Roster (Column B)
+- Verify ID format (should be numbers only, e.g., "123456789012345678")
+- Check Discord privacy settings for mentioned users
 
-**Solution**: This has been fixed with the consolidated reminder system. Each participant receives at most one email per run.
+**Messages Not Sending**:
+- Review script execution logs for error messages
+- Verify webhook URL hasn't expired
+- Check Discord server status
 
-### Time Formats Not Recognized
+### 7.2. Scheduling Issues
 
-**Solution**: The system now supports:
-- `18` (becomes 18:00-22:00)
-- `18:30` (becomes 18:30-22:30)  
-- `18:30:00` (becomes 18:30-22:30)
-- `18-22` (18:00-22:00)
-- `18:30-22:00` (18:30-22:00)
+**Status Always "Awaiting Responses"**:
+- Verify player names in roster exactly match response sheet headers
+- Check that Discord User IDs are present for all players
+- Ensure responses are in correct format (Y, N, ?, or time ranges)
 
-### Status Always Shows "Awaiting Responses"
+**Events Not Being Scheduled**:
+- Check that all players have responded
+- Verify intersection meets 4-hour minimum duration
+- Ensure event date is within processing window (3+ days ahead)
+- Review logs for optimal player combination analysis
 
-**Solution**: Ensure your player column headers exactly match the names in the "Player Roster" sheet. The system now ignores columns that don't correspond to actual players.
+**Archive/Future Date Issues**:
+- Check CONFIG settings for archive and future date parameters
+- Verify sheet structure hasn't been manually modified
+- Review execution logs for specific error messages
 
-### Events Not Being Scheduled
+### 7.3. Performance Issues
 
-**Common causes**:
-1. Check that all players have responded and status shows "Ready for scheduling"
-2. Verify the time intersection meets the minimum duration requirement (default: 2 hours)
-3. Ensure the event date is within the processing window (3+ days from now)
-4. Check the logs for detailed processing information
+**Slow Execution**:
+- Large data sets may need archive threshold adjustment
+- Consider reducing future date creation period
+- Monitor Google Apps Script execution time limits
+
+**Formatting Problems**:
+- Re-run formatting functions manually via menu
+- Check for manually modified sheet structure
+- Verify conditional formatting rules aren't conflicting
 
 ---
 
-## Potential Future Enhancements
+## 8. Future Enhancement Roadmap
 
-1. **Dynamic Configuration**: Move the `CONFIG` object into a dedicated "Settings" sheet for non-developer customization
-2. **Calendar Integration Options**: Support for multiple calendars or calendar selection
-3. **Advanced Notification Templates**: Customizable email templates with event-specific information
-4. **Player Availability Analytics**: Historical analysis and availability pattern reporting
-5. **Timezone Support**: Enhanced handling for players in different timezones
-6. **Mobile-Friendly Interface**: Optimized UI for mobile spreadsheet editing
+### 8.1. Short-term Improvements
+- **Multi-timezone support**: Handle players in different time zones
+- **Calendar integration**: Optional Google Calendar event creation alongside Discord
+- **Advanced templates**: Customizable Discord message templates
+- **Player analytics**: Availability pattern analysis and reporting
+
+### 8.2. Medium-term Features
+- **Multi-campaign support**: Handle multiple gaming groups/campaigns
+- **Role-based permissions**: Different access levels for players vs organizers
+- **Advanced scheduling**: Support for recurring events and flexible durations
+- **Integration APIs**: Webhooks for external systems (Roll20, etc.)
+
+### 8.3. Long-term Vision
+- **Web interface**: Browser-based configuration and monitoring
+- **Mobile optimization**: Better mobile spreadsheet experience
+- **AI assistance**: Intelligent scheduling recommendations
+- **Community features**: Shared availability calendars and group coordination
+
+---
+
+## 9. Technical Implementation Notes
+
+### 9.1. Architecture Decisions
+
+**Discord over Email/Calendar**:
+- Immediate notification delivery
+- Rich message formatting capabilities
+- Better integration with gaming communities
+- Reduced dependency on Google services
+
+**Spreadsheet as Database**:
+- Transparent state management
+- Easy manual intervention capability
+- Built-in version control through Google Sheets
+- No additional database requirements
+
+**Modular Code Structure**:
+- Separated concerns across multiple .gs files
+- Configurable message templates
+- Extensible notification system
+- Maintainable codebase organization
+
+### 9.2. Performance Optimizations
+
+**Batch Processing**:
+- Single Discord message per participant per run
+- Bulk archive operations
+- Efficient sheet range operations
+- Minimized API calls
+
+**Intelligent Scheduling**:
+- Adaptive processing windows
+- State-based execution control
+- Conditional processing logic
+- Resource-conscious operation
+
+This comprehensive documentation reflects the current state of the Discord-integrated scheduling system with automatic data management and enhanced player coordination features.
