@@ -1257,7 +1257,18 @@ function formatArchiveSheet() {
   }
 
   const lastRow = archiveSheet.getLastRow();
-  const lastCol = archiveSheet.getLastColumn();
+  let lastCol = archiveSheet.getLastColumn();
+
+  // --- Remove Today column if it exists ---
+  const headersRange = archiveSheet.getRange(CONFIG.headerRow, 1, 1, lastCol);
+  const headers = headersRange.getValues()[0];
+  const todayColIndex = headers.findIndex(h => h.toString().includes('Today')) + 1;
+  if (todayColIndex > 0) {
+    archiveSheet.deleteColumn(todayColIndex);
+    // After deleting the column, we need to refetch lastCol and headers
+    lastCol = archiveSheet.getLastColumn();
+  }
+
 
   if (lastRow < 2 || lastCol < CONFIG.firstPlayerColumn) {
     Logger.log('Insufficient data to format archive sheet.');
@@ -1279,14 +1290,17 @@ function formatArchiveSheet() {
   // Special header formatting
   archiveSheet.getRange(CONFIG.headerRow, CONFIG.dateColumn)
              .setBackground('#212529')
-             .setValue('📅 Date (Archived)');
+             .setValue('Date (Archived)');
 
-  const headers = headerRange.getValues()[0];
-  const statusColIndex = headers.indexOf(CONFIG.statusColumnName) + 1;
+  const updatedHeaders = archiveSheet.getRange(CONFIG.headerRow, 1, 1, lastCol).getValues()[0];
+  const statusColIndex = updatedHeaders.indexOf(CONFIG.statusColumnName) > -1
+    ? updatedHeaders.indexOf(CONFIG.statusColumnName) + 1
+    : updatedHeaders.indexOf('Final Status') + 1;
+
   if (statusColIndex > 0) {
     archiveSheet.getRange(CONFIG.headerRow, statusColIndex)
                .setBackground('#212529')
-               .setValue('📊 Final Status');
+               .setValue('Final Status');
   }
 
   // Player columns in archive
@@ -1296,7 +1310,7 @@ function formatArchiveSheet() {
     const currentHeader = archiveSheet.getRange(CONFIG.headerRow, col).getValue();
     if (currentHeader && currentHeader.toString().trim() !== '') {
       archiveSheet.getRange(CONFIG.headerRow, col)
-                 .setValue(`👤 ${currentHeader.toString().replace(/^👤\s*/, '')}`);
+                 .setValue(currentHeader.toString().replace(/^👤\s*/, ''));
     }
   }
 
@@ -1311,7 +1325,7 @@ function formatArchiveSheet() {
     dateCell.setBackground('#e9ecef')
            .setFontWeight('bold')
            .setHorizontalAlignment('center')
-           .setNumberFormat('ddd, mmm dd, yyyy');
+           .setNumberFormat('yyyy.mm.dd');
 
     // Player response columns
     for (let col = playerStartCol; col <= playerEndCol; col++) {
