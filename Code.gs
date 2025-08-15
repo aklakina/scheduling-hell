@@ -327,15 +327,34 @@ function checkAndScheduleEvents() {
         const status = event.rowData[statusColumnIndex - 1];
         if (status === "Awaiting responses") {
           const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
+
+          // Count Y responses to determine if we should send reminders
+          let yCount = 0;
           allResponses.forEach((response, i) => {
-            const responseStr = response ? String(response).trim().toLowerCase() : '';
-            if (responseStr === '?' || responseStr === '') {
-              const playerName = allPlayerNames[i];
-              if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
-                globalReminderEmails.add(playerInfo[playerName].discordHandle);
+            const playerName = allPlayerNames[i];
+            if (playerName && playerInfo[playerName]) {
+              const responseStr = response ? String(response).trim().toLowerCase() : '';
+              if (responseStr === 'y') {
+                yCount++;
               }
             }
           });
+
+          // Calculate minimum Y responses needed based on percentage of total players
+          const minYResponsesNeeded = Math.ceil(numPlayers * CONFIG.reminderThresholdPercentage);
+
+          // Only send reminders if there are enough Y answers
+          if (yCount >= minYResponsesNeeded) {
+            allResponses.forEach((response, i) => {
+              const responseStr = response ? String(response).trim().toLowerCase() : '';
+              if (responseStr === '?' || responseStr === '') {
+                const playerName = allPlayerNames[i];
+                if (playerName && playerInfo[playerName] && playerInfo[playerName].discordHandle) {
+                  globalReminderEmails.add(playerInfo[playerName].discordHandle);
+                }
+              }
+            });
+          }
         }
       });
     }
