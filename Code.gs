@@ -292,9 +292,12 @@ function checkAndScheduleEvents() {
     });
 
     // --- NEW: Check for events that could meet duration threshold with optimal player combination ---
-    eventsByWeek[week].forEach(event => {
+    eventsByWeek[week].forEach((event, eventIndex) => {
       const status = event.rowData[statusColumnIndex - 1];
-      if (status === "Awaiting responses") {
+
+      // Check both "Awaiting responses" AND "Ready for scheduling" events
+      // Ready events might still need notifications if they fail the 4-hour requirement
+      if (status === "Awaiting responses" || status === "Ready for scheduling") {
         const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
         const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
 

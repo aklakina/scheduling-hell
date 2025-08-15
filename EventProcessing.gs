@@ -23,6 +23,13 @@ function findOptimalPlayerCombination(responses, allPlayerNames, playerInfo, bas
     }
   });
 
+
+  // OPTIMIZATION: Find restricting players FIRST to exclude them from combination search
+  const restrictingPlayers = findRestrictingPlayers(validPlayerResponses, baseDate);
+
+  // Create a filtered list excluding restricting players for optimal combination search
+  const nonRestrictingPlayers = validPlayerResponses.filter(p => !restrictingPlayers.includes(p.playerName));
+
   // First, calculate what the intersection would be with ALL players
   const allPlayerResponses = validPlayerResponses.map(p => p.response);
   const { intersectionStart: allPlayersStart, intersectionEnd: allPlayersEnd } = calculateIntersectionForCombination(allPlayerResponses, baseDate);
@@ -43,21 +50,47 @@ function findOptimalPlayerCombination(responses, allPlayerNames, playerInfo, bas
     };
   }
 
-  // Find the optimal combination that meets the threshold
+  // If we have no non-restricting players, return early
+  if (nonRestrictingPlayers.length === 0) {
+    Logger.log(`All players are restricting - no valid combination possible`);
+    return {
+      players: [],
+      intersectionStart: null,
+      intersectionEnd: null,
+      duration: 0,
+      restrictingPlayers: restrictingPlayers
+    };
+  }
+
+  // Find the optimal combination that meets the threshold - using ONLY non-restricting players
   let bestCombination = {
     players: [],
     intersectionStart: null,
     intersectionEnd: null,
     duration: 0,
-    restrictingPlayers: []
+    restrictingPlayers: restrictingPlayers
   };
 
-  // Try all possible combinations of players (starting from largest)
-  for (let size = validPlayerResponses.length; size >= Math.ceil(totalPlayers * CONFIG.playerCombinationThresholdPercentage); size--) {
-    const combinations = generateCombinations(validPlayerResponses, size);
+  const minCombinationSize = Math.ceil(totalPlayers * CONFIG.playerCombinationThresholdPercentage);
+  if (minCombinationSize > nonRestrictingPlayers.length) {
+    return bestCombination; // No valid combinations possible
+  }
+  // Try all possible combinations of NON-RESTRICTING players (starting from largest)
+  const maxSearchSize = Math.min(nonRestrictingPlayers.length, totalPlayers); // Don't search beyond total players
+  for (let size = maxSearchSize; size >= minCombinationSize; size--) {
+    // Skip if we don't have enough non-restricting players for this size
+    if (size > nonRestrictingPlayers.length) {
+      continue;
+    }
 
-    for (const combination of combinations) {
+    const combinations = generateCombinations(nonRestrictingPlayers, size);
+
+    for (let combIndex = 0; combIndex < combinations.length; combIndex++) {
+      const combination = combinations[combIndex];
+      const combinationPlayerNames = combination.map(p => p.playerName);
       const combinationResponses = combination.map(p => p.response);
+
+
       const { intersectionStart, intersectionEnd } = calculateIntersectionForCombination(combinationResponses, baseDate);
 
       if (intersectionStart !== undefined && intersectionEnd !== undefined) {
@@ -65,18 +98,15 @@ function findOptimalPlayerCombination(responses, allPlayerNames, playerInfo, bas
 
         // Check if this combination meets the minimum event duration
         if (duration >= CONFIG.minEventDurationHours) {
-          // Find restricting players - those whose time constraints limit the full group
-          const restrictingPlayers = findRestrictingPlayers(validPlayerResponses, baseDate);
 
           bestCombination = {
-            players: combination.map(p => p.playerName),
+            players: combinationPlayerNames,
             intersectionStart,
             intersectionEnd,
             duration,
-            restrictingPlayers
+            restrictingPlayers: restrictingPlayers
           };
 
-          // Found the largest valid combination, return it
           return bestCombination;
         }
       }
