@@ -87,6 +87,17 @@ function setupSheet() {
   // Apply formatting after setup
   formatResponseSheet();
 
+  // Create future date rows for the next 2 months
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    createFutureDateRows(ss, today);
+    Logger.log('Future date rows created successfully.');
+  } catch (error) {
+    Logger.log(`Error creating future date rows: ${error.toString()}`);
+    SpreadsheetApp.getUi().alert(`Sheet setup completed, but there was an error creating date rows: ${error.toString()}`);
+  }
+
   // Send Discord notification with sheet link
   try {
     const notificationSent = sendDiscordSheetSetupNotification();
