@@ -109,33 +109,110 @@ function setupSheet() {
            .setHorizontalAlignment('center')
            .setVerticalAlignment('middle');
 
-  // Apply special header formatting
-  const structure = getSheetStructure(sheet);
-  applySpecialHeaderFormatting(sheet, structure);
+  // Date column header special formatting
+  sheet.getRange(CONFIG.headerRow, CONFIG.dateColumn)
+       .setBackground('#1a73e8');
 
-  // Create initial date rows (2 months from today including today)
-  const today = new Date();
-  const dateRows = [];
-
-  for (let day = 0; day < (CONFIG.monthsToCreateAhead * 30); day++) { // Approximate 2 months
-    const currentDate = new Date(today);
-    currentDate.setDate(today.getDate() + day);
-    dateRows.push(currentDate);
+  // Status column special formatting
+  const statusColIndex = headers.indexOf(CONFIG.statusColumnName) + 1;
+  if (statusColIndex > 0) {
+    sheet.getRange(CONFIG.headerRow, statusColIndex)
+         .setBackground('#1a73e8');
   }
 
-  // Add the date rows with formulas
-  createDateRowsWithFormulas(sheet, dateRows, structure);
-
-  // Apply comprehensive formatting
-  try {
-    formatResponseSheet();
-
-    const daysCreated = CONFIG.monthsToCreateAhead * 30;
-    SpreadsheetApp.getUi().alert(`✅ Response sheet created successfully!\n\n• 📅 Date column with ${daysCreated} days starting today\n• 📆 Localized day names\n• 👤 ${playerNames.length} player columns from roster\n• ⏰ Today indicator (shows arrow for current date)\n• 📊 Status tracking\n• ✅❌❓ Quick response dropdowns\n• 🎨 Professional formatting applied\n\nYou can now start collecting responses!`);
-  } catch (error) {
-    Logger.log(`Error applying formatting: ${error.toString()}`);
-    SpreadsheetApp.getUi().alert(`✅ Response sheet created successfully!\n\nThe sheet structure has been set up, but there was an issue applying formatting. You can manually apply it using the "🎨 Format Response Sheet" menu item.`);
+  // Find and format Today column
+  const todayColIndex = headers.findIndex(h => h.toString().includes('Today')) + 1;
+  if (todayColIndex > 0) {
+    sheet.getRange(CONFIG.headerRow, todayColIndex)
+         .setBackground('#1a73e8');
   }
+
+  // Find and format Day column
+  const dayColIndex = headers.findIndex(h => h.toString().includes('Day')) + 1;
+  if (dayColIndex > 0) {
+    sheet.getRange(CONFIG.headerRow, dayColIndex)
+         .setBackground('#1a73e8');
+  }
+
+  // Calculate player column range
+  const playerStartCol = CONFIG.firstPlayerColumn;
+  const playerEndCol = statusColIndex > 0 ? statusColIndex - 1 : lastCol;
+
+  // --- Data Row Formatting ---
+  for (let row = CONFIG.firstDataRow; row <= lastRow; row++) {
+    // Date column formatting - ensure yyyy.MM.dd format
+    const dateCell = sheet.getRange(row, CONFIG.dateColumn);
+    dateCell.setBackground('#f8f9fa')
+           .setFontWeight('bold')
+           .setHorizontalAlignment('center')
+           .setNumberFormat('yyyy.mm.dd'); // yyyy.MM.dd format
+
+    // Player response columns
+    for (let col = playerStartCol; col <= playerEndCol; col++) {
+      const cell = sheet.getRange(row, col);
+      cell.setHorizontalAlignment('center')
+          .setVerticalAlignment('middle')
+          .setFontSize(11);
+    }
+
+    // Status column formatting
+    if (statusColIndex > 0) {
+      const statusCell = sheet.getRange(row, statusColIndex);
+      statusCell.setBackground('#f8f9fa')
+             .setFontSize(10)
+             .setHorizontalAlignment('center')
+             .setVerticalAlignment('middle');
+    }
+  }
+
+  // --- Data Validation for Player Columns ---
+  if (lastRow >= CONFIG.firstDataRow) {
+    // Get roster data to identify actual player columns
+    const rosterSheet = ss.getSheetByName(CONFIG.rosterSheetName);
+    if (rosterSheet && rosterSheet.getLastRow() >= 2) {
+      const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 1).getValues();
+      const playerNames = rosterData.map(row => row[0]).filter(name => name && name.toString().trim() !== '');
+
+      // Apply validation only to columns that match player names in the roster
+      for (let col = playerStartCol; col <= playerEndCol; col++) {
+        const headerValue = sheet.getRange(CONFIG.headerRow, col).getValue();
+        const cleanHeaderName = headerValue ? headerValue.toString().replace(/^👤\s*/, '').trim() : '';
+
+        // Only apply validation if this column header matches a player in the roster
+        if (playerNames.includes(cleanHeaderName)) {
+          const playerColumnRange = sheet.getRange(CONFIG.firstDataRow, col,
+                                                  lastRow - CONFIG.firstDataRow + 1, 1);
+
+          // Create dropdown with emojis for quick selection but allow custom entries
+          const rule = SpreadsheetApp.newDataValidation()
+            .requireValueInList(['✅ y', '❌ n', '❓ ?', ''], true)
+            .setAllowInvalid(true) // Allow time ranges and custom entries
+            .setHelpText('Quick select: ✅ y (yes), ❌ n (no), ❓ ? (maybe), or enter time range (e.g., 18-22)')
+            .build();
+
+          playerColumnRange.setDataValidation(rule);
+        }
+      }
+    }
+  }
+
+  // --- Conditional Formatting Rules ---
+  addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, statusColIndex);
+
+  // --- Column Widths ---
+  sheet.setColumnWidth(CONFIG.dateColumn, 150);
+  for (let col = playerStartCol; col <= playerEndCol; col++) {
+    sheet.setColumnWidth(col, 80);
+  }
+  if (statusColIndex > 0) {
+    sheet.setColumnWidth(statusColIndex, 200);
+  }
+
+  // Freeze header row and date column
+  sheet.setFrozenRows(CONFIG.headerRow);
+  sheet.setFrozenColumns(CONFIG.dateColumn);
+
+  Logger.log('Response sheet formatting applied successfully.');
 }
 
 
@@ -785,9 +862,6 @@ function createFutureDateRows(ss, today) {
     return;
   }
 
-  // Get sheet structure using helper function
-  const structure = getSheetStructure(responseSheet);
-
   // Calculate target end date for 2 months including today
   const targetEndDate = new Date(today);
   targetEndDate.setMonth(today.getMonth() + CONFIG.monthsToCreateAhead);
@@ -822,8 +896,41 @@ function createFutureDateRows(ss, today) {
     return;
   }
 
-  // Use helper function to create date rows with formulas
-  createDateRowsWithFormulas(responseSheet, newDates, structure);
+  // Get the current sheet structure to build proper rows
+  const headers = responseSheet.getRange(CONFIG.headerRow, 1, 1, responseSheet.getLastColumn()).getValues()[0];
+  const totalColumns = headers.length;
+
+  // Find Today and Status column indices
+  const todayColIndex = headers.findIndex(h => h.toString().includes('Today')) + 1;
+  const statusColIndex = headers.findIndex(h => h.toString().includes('Status')) + 1;
+
+  // Add new date rows to the response sheet
+  newDates.forEach((date, index) => {
+    const newRowData = new Array(totalColumns).fill('');
+    const newRowIndex = lastRow + index + 1;
+
+    newRowData[0] = date; // Date column (A)
+    newRowData[1] = ''; // Day column - will set formula after appending
+
+    // Add Today formula if Today column exists
+    if (todayColIndex > 0) {
+      newRowData[todayColIndex - 1] = ''; // Will set formula after appending
+    }
+
+    // Status column starts empty
+    if (statusColIndex > 0) {
+      newRowData[statusColIndex - 1] = '';
+    }
+
+    responseSheet.appendRow(newRowData);
+
+    // Set formulas after the row is added
+    responseSheet.getRange(newRowIndex, 2).setFormula("=TEXT(A" + newRowIndex + ";\"dddd\")"); // Day column formula
+
+    if (todayColIndex > 0) {
+      responseSheet.getRange(newRowIndex, todayColIndex).setFormula("=IF(TODAY()=A" + newRowIndex + ";\"<-----\";\"\")"); // Today formula
+    }
+  });
 
   Logger.log(`Created ${newDates.length} new date rows up to ${targetEndDate.toLocaleDateString()}.`);
 }
@@ -862,15 +969,101 @@ function formatResponseSheet() {
            .setHorizontalAlignment('center')
            .setVerticalAlignment('middle');
 
+  // Date column header special formatting
+  sheet.getRange(CONFIG.headerRow, CONFIG.dateColumn)
+       .setBackground('#1a73e8');
+
+  // Status column special formatting
+  const statusColIndex = headers.indexOf(CONFIG.statusColumnName) + 1;
+  if (statusColIndex > 0) {
+    sheet.getRange(CONFIG.headerRow, statusColIndex)
+         .setBackground('#1a73e8');
+  }
+
+  // Find and format Today column
+  const todayColIndex = headers.findIndex(h => h.toString().includes('Today')) + 1;
+  if (todayColIndex > 0) {
+    sheet.getRange(CONFIG.headerRow, todayColIndex)
+         .setBackground('#1a73e8');
+  }
+
+  // Find and format Day column
+  const dayColIndex = headers.findIndex(h => h.toString().includes('Day')) + 1;
+  if (dayColIndex > 0) {
+    sheet.getRange(CONFIG.headerRow, dayColIndex)
+         .setBackground('#1a73e8');
+  }
+
+  // Calculate player column range
+  const playerStartCol = CONFIG.firstPlayerColumn;
+  const playerEndCol = statusColIndex > 0 ? statusColIndex - 1 : lastCol;
+
+  // --- Data Row Formatting ---
+  for (let row = CONFIG.firstDataRow; row <= lastRow; row++) {
+    // Date column formatting - ensure yyyy.MM.dd format
+    const dateCell = sheet.getRange(row, CONFIG.dateColumn);
+    dateCell.setBackground('#f8f9fa')
+           .setFontWeight('bold')
+           .setHorizontalAlignment('center')
+           .setNumberFormat('yyyy.mm.dd'); // yyyy.MM.dd format
+
+    // Player response columns
+    for (let col = playerStartCol; col <= playerEndCol; col++) {
+      const cell = sheet.getRange(row, col);
+      cell.setHorizontalAlignment('center')
+          .setVerticalAlignment('middle')
+          .setFontSize(11);
+    }
+
+    // Status column formatting
+    if (statusColIndex > 0) {
+      const statusCell = sheet.getRange(row, statusColIndex);
+      statusCell.setBackground('#f8f9fa')
+             .setFontSize(10)
+             .setHorizontalAlignment('center')
+             .setVerticalAlignment('middle');
+    }
+  }
+
+  // --- Data Validation for Player Columns ---
+  if (lastRow >= CONFIG.firstDataRow) {
+    // Get roster data to identify actual player columns
+    const rosterSheet = ss.getSheetByName(CONFIG.rosterSheetName);
+    if (rosterSheet && rosterSheet.getLastRow() >= 2) {
+      const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 1).getValues();
+      const playerNames = rosterData.map(row => row[0]).filter(name => name && name.toString().trim() !== '');
+
+      // Apply validation only to columns that match player names in the roster
+      for (let col = playerStartCol; col <= playerEndCol; col++) {
+        const headerValue = sheet.getRange(CONFIG.headerRow, col).getValue();
+        const cleanHeaderName = headerValue ? headerValue.toString().replace(/^👤\s*/, '').trim() : '';
+
+        // Only apply validation if this column header matches a player in the roster
+        if (playerNames.includes(cleanHeaderName)) {
+          const playerColumnRange = sheet.getRange(CONFIG.firstDataRow, col,
+                                                  lastRow - CONFIG.firstDataRow + 1, 1);
+
+          // Create dropdown with emojis for quick selection but allow custom entries
+          const rule = SpreadsheetApp.newDataValidation()
+            .requireValueInList(['✅ y', '❌ n', '❓ ?', ''], true)
+            .setAllowInvalid(true) // Allow time ranges and custom entries
+            .setHelpText('Quick select: ✅ y (yes), ❌ n (no), ❓ ? (maybe), or enter time range (e.g., 18-22)')
+            .build();
+
+          playerColumnRange.setDataValidation(rule);
+        }
+      }
+    }
+  }
+
   // --- Conditional Formatting Rules ---
-  addConditionalFormattingRules(sheet, CONFIG.firstPlayerColumn, lastCol, headers.indexOf(CONFIG.statusColumnName) + 1);
+  addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, statusColIndex);
 
   // --- Column Widths ---
   sheet.setColumnWidth(CONFIG.dateColumn, 150);
-  for (let col = CONFIG.firstPlayerColumn; col <= lastCol; col++) {
+  for (let col = playerStartCol; col <= playerEndCol; col++) {
     sheet.setColumnWidth(col, 80);
   }
-  const statusColIndex = headers.indexOf(CONFIG.statusColumnName) + 1;
   if (statusColIndex > 0) {
     sheet.setColumnWidth(statusColIndex, 200);
   }
