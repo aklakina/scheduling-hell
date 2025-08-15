@@ -22,10 +22,15 @@ function sendDiscordEventNotification(date, start, end, eventTitle, eventLink) {
     const fullEventTitle = `${eventTitle} - ${eventDate}${eventTime}${eventEndTime}`;
     const eventLinkMessage = eventLink ? `\nEvent Link: ${eventLink}` : '';
 
+    // Use message template from config
+    const messageContent = CONFIG.messages.discord.eventScheduled
+      .replace('{eventTitle}', fullEventTitle)
+      .replace('{eventLink}', eventLinkMessage);
+
     const payload = JSON.stringify({
-      content: `${channelMention} 🎉 **Event Scheduled**: ${fullEventTitle}!${eventLinkMessage}`,
-      username: "Scheduler Bot",
-      avatar_url: "https://example.com/bot-avatar.png"
+      content: `${messageContent} ${channelMention}`,
+      username: CONFIG.messages.discord.botUsername,
+      avatar_url: CONFIG.messages.discord.botAvatarUrl
     });
 
     const options = {
@@ -44,7 +49,7 @@ function sendDiscordEventNotification(date, start, end, eventTitle, eventLink) {
 /**
  * Send Discord reminder notifications to players who haven't responded
  */
-function sendDiscordReminder(reminderEmails) {
+function sendDiscordReminder(reminderEmails, reminderType = 'mixed') {
   try {
     const webhookUrl = CONFIG.discordWebhookUrl;
     const channelMention = CONFIG.discordChannelMention;
@@ -64,10 +69,24 @@ function sendDiscordReminder(reminderEmails) {
 
     const mentionText = discordMentions.length > 0 ? discordMentions.join(' ') : channelMention;
 
+    // Choose message based on reminder type
+    let message;
+    switch (reminderType) {
+      case 'maybe':
+        message = CONFIG.messages.discord.reminder;
+        break;
+      case 'noResponse':
+        message = CONFIG.messages.discord.reminderNoResponse;
+        break;
+      default:
+        // Mixed or fallback - use the general reminder message
+        message = CONFIG.messages.discord.reminder;
+    }
+
     const payload = JSON.stringify({
-      content: `${mentionText} 📅 **Reminder**: Please update your availability for upcoming events in the Google Sheet. We are trying to finalize the schedule for the next few weeks. Thanks!`,
-      username: "Scheduler Bot",
-      avatar_url: "https://example.com/bot-avatar.png"
+      content: `${message} ${mentionText}`,
+      username: CONFIG.messages.discord.botUsername,
+      avatar_url: CONFIG.messages.discord.botAvatarUrl
     });
 
     const options = {
@@ -77,7 +96,7 @@ function sendDiscordReminder(reminderEmails) {
     };
 
     UrlFetchApp.fetch(webhookUrl, options);
-    Logger.log(`Discord reminder sent to ${reminderEmails.size} participants: ${[...reminderEmails].join(', ')}`);
+    Logger.log(`Discord reminder (${reminderType}) sent to ${reminderEmails.size} participants: ${[...reminderEmails].join(', ')}`);
     return true;
   } catch (error) {
     Logger.log(`Error sending Discord reminder: ${error.toString()}`);
@@ -113,10 +132,16 @@ function sendDiscordDurationRestrictionNotification(restrictingPlayers, eventDat
     const mentionText = discordMentions.join(' ');
     const eventDateStr = eventDate.toLocaleDateString();
 
+    // Use message template from config
+    const messageContent = CONFIG.messages.discord.durationRestriction
+      .replace('{eventDate}', eventDateStr)
+      .replace('{minHours}', CONFIG.minEventDurationHours)
+      .replace('{optimalHours}', optimalDuration.toFixed(1));
+
     const payload = JSON.stringify({
-      content: `${mentionText} ⏰ **Event Duration Notice**: Your availability constraints are limiting the event on ${eventDateStr} to less than ${CONFIG.minEventDurationHours} hours. The optimal player combination could achieve ${optimalDuration.toFixed(1)} hours. Please consider adjusting your availability if possible to allow for a longer event. Thanks!`,
-      username: "Scheduler Bot",
-      avatar_url: "https://example.com/bot-avatar.png"
+      content: `${messageContent} ${mentionText}`,
+      username: CONFIG.messages.discord.botUsername,
+      avatar_url: CONFIG.messages.discord.botAvatarUrl
     });
 
     const options = {
@@ -130,6 +155,48 @@ function sendDiscordDurationRestrictionNotification(restrictingPlayers, eventDat
     return true;
   } catch (error) {
     Logger.log(`Error sending Discord duration restriction notification: ${error.toString()}`);
+    return false;
+  }
+}
+
+/**
+ * Send Discord notification when sheet setup is completed
+ */
+function sendDiscordSheetSetupNotification() {
+  try {
+    const webhookUrl = CONFIG.discordWebhookUrl;
+    const channelMention = CONFIG.discordChannelMention;
+
+    if (!webhookUrl) {
+      Logger.log(`Discord webhook URL is not set. Skipping sheet setup notification.`);
+      return false;
+    }
+
+    // Get the current spreadsheet URL
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetUrl = ss.getUrl();
+
+    // Use message template from config
+    const messageContent = CONFIG.messages.discord.sheetSetup
+      .replace('{sheetUrl}', sheetUrl);
+
+    const payload = JSON.stringify({
+      content: `${messageContent} ${channelMention}`,
+      username: CONFIG.messages.discord.botUsername,
+      avatar_url: CONFIG.messages.discord.botAvatarUrl
+    });
+
+    const options = {
+      method: "post",
+      contentType: "application/json",
+      payload: payload
+    };
+
+    UrlFetchApp.fetch(webhookUrl, options);
+    Logger.log(`Discord sheet setup notification sent with URL: ${sheetUrl}`);
+    return true;
+  } catch (error) {
+    Logger.log(`Error sending Discord sheet setup notification: ${error.toString()}`);
     return false;
   }
 }

@@ -36,7 +36,8 @@ function setupSheet() {
   // Get roster data first to build the proper structure
   const rosterSheet = ss.getSheetByName(CONFIG.rosterSheetName);
   if (!rosterSheet || rosterSheet.getLastRow() < 2) {
-    SpreadsheetApp.getUi().alert(`Error: The "${CONFIG.rosterSheetName}" sheet was not found or has no player data. Please create the roster sheet first with player names in column A.`);
+    const message = CONFIG.messages.ui.setupSheet.rosterNotFound.replace('{rosterSheetName}', CONFIG.rosterSheetName);
+    SpreadsheetApp.getUi().alert(message);
     return;
   }
 
@@ -44,15 +45,17 @@ function setupSheet() {
   const playerNames = rosterData.map(row => row[0]).filter(name => name && name.toString().trim() !== '');
 
   if (playerNames.length === 0) {
-    SpreadsheetApp.getUi().alert(`Error: No player names found in the "${CONFIG.rosterSheetName}" sheet. Please add player names in column A starting from row 2.`);
+    const message = CONFIG.messages.ui.setupSheet.noPlayersFound.replace('{rosterSheetName}', CONFIG.rosterSheetName);
+    SpreadsheetApp.getUi().alert(message);
     return;
   }
 
   // Create or recreate the response sheet with proper structure
   if (sheet) {
+    const confirmMessage = CONFIG.messages.ui.setupSheet.confirmRecreate.replace('{responseSheetName}', CONFIG.responseSheetName);
     const response = SpreadsheetApp.getUi().alert(
       'Setup Response Sheet',
-      `The "${CONFIG.responseSheetName}" sheet already exists. Do you want to recreate it with the current roster structure? This will delete all existing data.`,
+      confirmMessage,
       SpreadsheetApp.getUi().ButtonSet.YES_NO
     );
 
@@ -60,7 +63,7 @@ function setupSheet() {
       ss.deleteSheet(sheet);
       sheet = ss.insertSheet(CONFIG.responseSheetName);
     } else {
-      SpreadsheetApp.getUi().alert('Setup cancelled. No changes were made.');
+      SpreadsheetApp.getUi().alert(CONFIG.messages.ui.setupSheet.setupCancelled);
       return;
     }
   } else {
@@ -83,6 +86,17 @@ function setupSheet() {
 
   // Apply formatting after setup
   formatResponseSheet();
+
+  // Send Discord notification with sheet link
+  try {
+    const notificationSent = sendDiscordSheetSetupNotification();
+    if (notificationSent) {
+      Logger.log('Discord setup notification sent successfully.');
+    }
+  } catch (error) {
+    Logger.log(`Error sending Discord setup notification: ${error.toString()}`);
+    // Don't fail the setup if Discord notification fails
+  }
 }
 
 /**
@@ -144,13 +158,14 @@ function onEditFeedback(e) {
 
   if (!['y', 'n', '?', ''].includes(value)) {
     if (isNaN(date.getTime())) {
-      ui.alert("Error: Could not find a valid date in column A for this row.");
+      ui.alert(CONFIG.messages.ui.invalidDate);
       return;
     }
     date.setHours(12, 0, 0, 0);
     const parsedTime = parseTimeRange(value, date);
     if (!parsedTime) {
-      ui.alert(`Invalid Time Format`, `Your entry "${e.value}" is not a valid time or time range. Please use formats like "18:00", "18-22", or "18:30-22:00".`, ui.ButtonSet.OK);
+      const message = CONFIG.messages.ui.invalidTimeFormat.message.replace('{userInput}', e.value);
+      ui.alert(CONFIG.messages.ui.invalidTimeFormat.title, message, ui.ButtonSet.OK);
       return; // Exit early if invalid format
     }
   }
@@ -253,7 +268,8 @@ function checkAndScheduleEvents() {
   });
 
   // --- Process each week ---
-  const globalReminderEmails = new Set(); // Collect all reminder emails globally
+  const globalMaybeEmails = new Set(); // Players who answered "?"
+  const globalNoResponseEmails = new Set(); // Players who didn't respond at all
 
   for (const week in eventsByWeek) {
     let bestEvent = null;
@@ -351,7 +367,7 @@ function checkAndScheduleEvents() {
         Logger.log(`Marked ${failedReadyEvents.length} events as failed due to short duration for week ${week}.`);
       }
 
-      // Collect reminder emails for "Awaiting" events (but don't send yet)
+      // Collect reminder emails for "Awaiting" events, separating by response type
       eventsByWeek[week].forEach(event => {
         const status = event.rowData[statusColumnIndex - 1];
         if (status === "Awaiting responses") {
@@ -375,11 +391,15 @@ function checkAndScheduleEvents() {
           // Only send reminders if there are enough Y answers
           if (yCount >= minYResponsesNeeded) {
             allResponses.forEach((response, i) => {
-              const responseStr = response ? String(response).trim().toLowerCase() : '';
-              if (responseStr === '?' || responseStr === '') {
-                const playerName = allPlayerNames[i];
-                if (playerName && playerInfo[playerName] && playerInfo[playerName].discordHandle) {
-                  globalReminderEmails.add(playerInfo[playerName].discordHandle);
+              const playerName = allPlayerNames[i];
+              if (playerName && playerInfo[playerName] && playerInfo[playerName].discordHandle) {
+                const responseStr = response ? String(response).trim().toLowerCase() : '';
+                if (responseStr === '?') {
+                  // Player answered "maybe"
+                  globalMaybeEmails.add(playerInfo[playerName].discordHandle);
+                } else if (responseStr === '') {
+                  // Player didn't respond at all
+                  globalNoResponseEmails.add(playerInfo[playerName].discordHandle);
                 }
               }
             });
@@ -389,35 +409,49 @@ function checkAndScheduleEvents() {
     }
   }
 
-  // Send consolidated reminders once per participant after processing all weeks
-  if (globalReminderEmails.size > 0) {
-    const reminderSent = sendDiscordReminder(globalReminderEmails);
+  // Send separate targeted reminders for each group
+  let remindersUpdated = false;
 
-    if (reminderSent) {
-      // Update status for all reminded rows across all weeks
-      for (const week in eventsByWeek) {
-        eventsByWeek[week].forEach(event => {
-          const status = event.rowData[statusColumnIndex - 1];
-          if (status === 'Awaiting responses') {
-            // Check if any player in this row needed a reminder
-            const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
-            let hasReminderRecipient = false;
-            allResponses.forEach((response, i) => {
-              const responseStr = response ? String(response).trim().toLowerCase() : '';
-              if (responseStr === '?' || responseStr === '') {
-                const playerName = allPlayerNames[i];
-                if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
-                  hasReminderRecipient = true;
-                }
+  if (globalMaybeEmails.size > 0) {
+    const maybeReminderSent = sendDiscordReminder(globalMaybeEmails, 'maybe');
+    if (maybeReminderSent) {
+      Logger.log(`Sent "maybe" reminders to ${globalMaybeEmails.size} players who answered "?"`);
+      remindersUpdated = true;
+    }
+  }
+
+  if (globalNoResponseEmails.size > 0) {
+    const noResponseReminderSent = sendDiscordReminder(globalNoResponseEmails, 'noResponse');
+    if (noResponseReminderSent) {
+      Logger.log(`Sent "no response" reminders to ${globalNoResponseEmails.size} players who didn't respond`);
+      remindersUpdated = true;
+    }
+  }
+
+  // Update status for all reminded rows across all weeks
+  if (remindersUpdated) {
+    for (const week in eventsByWeek) {
+      eventsByWeek[week].forEach(event => {
+        const status = event.rowData[statusColumnIndex - 1];
+        if (status === 'Awaiting responses') {
+          // Check if any player in this row needed a reminder
+          const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
+          let hasReminderRecipient = false;
+          allResponses.forEach((response, i) => {
+            const responseStr = response ? String(response).trim().toLowerCase() : '';
+            if (responseStr === '?' || responseStr === '') {
+              const playerName = allPlayerNames[i];
+              if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
+                hasReminderRecipient = true;
               }
-            });
-
-            if (hasReminderRecipient) {
-              responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue(`Reminder sent on ${today.toLocaleDateString()}`);
             }
+          });
+
+          if (hasReminderRecipient) {
+            responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue(`Reminder sent on ${today.toLocaleDateString()}`);
           }
-        });
-      }
+        }
+      });
     }
   }
 

@@ -114,7 +114,7 @@ function formatResponseSheet() {
           const rule = SpreadsheetApp.newDataValidation()
             .requireValueInList(['Y', 'N', '?', ''], true)
             .setAllowInvalid(true) // Allow time ranges and custom entries
-            .setHelpText('Quick select: Y (yes), N (no), ? (maybe), or enter time range (e.g., 18-22)')
+            .setHelpText(CONFIG.messages.validation.playerResponseHelp)
             .build();
 
           playerColumnRange.setDataValidation(rule);
@@ -301,17 +301,17 @@ function formatArchiveSheet() {
   // Special header formatting
   archiveSheet.getRange(CONFIG.headerRow, CONFIG.dateColumn)
              .setBackground('#212529')
-             .setValue('Date (Archived)');
+             .setValue(CONFIG.messages.archive.dateColumnHeader);
 
   const updatedHeaders = archiveSheet.getRange(CONFIG.headerRow, 1, 1, lastCol).getValues()[0];
   const statusColIndex = updatedHeaders.indexOf(CONFIG.statusColumnName) > -1
     ? updatedHeaders.indexOf(CONFIG.statusColumnName) + 1
-    : updatedHeaders.indexOf('Final Status') + 1;
+    : updatedHeaders.indexOf(CONFIG.messages.archive.statusColumnHeader) + 1;
 
   if (statusColIndex > 0) {
     archiveSheet.getRange(CONFIG.headerRow, statusColIndex)
                .setBackground('#212529')
-               .setValue('Final Status');
+               .setValue(CONFIG.messages.archive.statusColumnHeader);
   }
 
   // Player columns in archive
