@@ -266,31 +266,57 @@ function checkAndScheduleEvents() {
       if (status === "Ready for scheduling") {
         const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
         const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
-        const { intersectionStart, intersectionEnd } = calculateIntersection(allResponses, eventDate);
-        if (intersectionStart == null && intersectionEnd == null) {
-          // This is an all-day event (all 'Y')
-          bestEvent = {
-            date: eventDate,
-            start: null,
-            end: null,
-            rowIndex: event.rowIndex
-          }
-          maxDuration = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-        } else if (intersectionStart !== undefined && intersectionEnd !== undefined) {
-          // This is a valid, schedulable event (timed or all-day)
-          const duration = (intersectionEnd ? intersectionEnd.getTime() : new Date(eventDate).setHours(24)) - (intersectionStart ? intersectionStart.getTime() : new Date(eventDate).setHours(0));
+
+        // Use the new optimal combination logic to ensure we meet the 4-hour minimum
+        const optimalCombination = findOptimalPlayerCombination(allResponses, allPlayerNames, playerInfo, eventDate);
+
+        // Check if this event can actually be scheduled with the 4-hour minimum
+        if (optimalCombination.duration >= CONFIG.minEventDurationHours &&
+            optimalCombination.players.length === numPlayers) {
+          // All players can participate for 4+ hours
+          const duration = optimalCombination.duration * 3600000; // Convert to milliseconds
           if (duration > maxDuration) {
             maxDuration = duration;
             bestEvent = {
               date: eventDate,
-              start: intersectionStart,
-              end: intersectionEnd,
+              start: optimalCombination.intersectionStart,
+              end: optimalCombination.intersectionEnd,
               rowIndex: event.rowIndex
             };
           }
         } else {
-          // This event was "Ready" but failed validation (e.g., too short)
+          // This event was "Ready" but doesn't meet the 4-hour minimum with all players
           failedReadyEvents.push(event.rowIndex);
+        }
+      }
+    });
+
+    // --- NEW: Check for events that could meet duration threshold with optimal player combination ---
+    eventsByWeek[week].forEach(event => {
+      const status = event.rowData[statusColumnIndex - 1];
+      if (status === "Awaiting responses") {
+        const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
+        const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
+
+        // Find optimal player combination
+        const optimalCombination = findOptimalPlayerCombination(allResponses, allPlayerNames, playerInfo, eventDate);
+
+        // Check if optimal combination meets the 60% threshold and has restricting players
+        if (optimalCombination.players.length >= Math.ceil(numPlayers * CONFIG.playerCombinationThresholdPercentage) &&
+            optimalCombination.duration >= CONFIG.minEventDurationHours &&
+            optimalCombination.restrictingPlayers.length > 0) {
+
+          // Send notification to restricting players
+          const notificationSent = sendDiscordDurationRestrictionNotification(
+            optimalCombination.restrictingPlayers,
+            eventDate,
+            optimalCombination.duration,
+            playerInfo
+          );
+
+          if (notificationSent) {
+            Logger.log(`Sent duration restriction notification for ${eventDate.toLocaleDateString()} to players: ${optimalCombination.restrictingPlayers.join(', ')}`);
+          }
         }
       }
     });
