@@ -153,10 +153,16 @@ function onEditFeedback(e) {
   const rosterLastRow = rosterSheet.getLastRow();
   if (rosterLastRow < 2) return; // No player data
 
-  const rosterData = rosterSheet.getRange(2, 1, rosterLastRow - 1, 2).getValues();
+  // Updated to read 3 columns instead of 2 to include mention preference
+  const rosterData = rosterSheet.getRange(2, 1, rosterLastRow - 1, 3).getValues();
   const playerInfo = {};
   rosterData.forEach(row => {
-    if (row[0]) playerInfo[row[0]] = { discordHandle: row[1] };
+    if (row[0]) {
+      playerInfo[row[0]] = {
+        discordHandle: row[1] || "",
+        allowMention: Boolean(row[2])
+      };
+    }
   });
   const numPlayers = Object.keys(playerInfo).length;
   if (numPlayers === 0) return;
@@ -207,10 +213,16 @@ function checkAndScheduleEvents() {
   const campaignSheet = ss.getSheetByName(CONFIG.campaignDetailsSheetName);
   if (!campaignSheet) { Logger.log(`Error: Sheet '${CONFIG.campaignDetailsSheetName}' not found.`); return; }
 
-  const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 2).getValues();
+  // Updated to read 3 columns instead of 2 to include mention preference checkbox
+  const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow() - 1, 3).getValues();
   const playerInfo = {};
   rosterData.forEach(row => {
-    if (row[0]) playerInfo[row[0]] = { discordHandle: row[1] };
+    if (row[0]) {
+      playerInfo[row[0]] = {
+        discordHandle: row[1] || "",
+        allowMention: Boolean(row[2]) // New column for mention preference
+      };
+    }
   });
   const numPlayers = Object.keys(playerInfo).length;
   if (numPlayers === 0) { Logger.log("No players found in roster."); return; }
@@ -492,7 +504,7 @@ function checkAndScheduleEvents() {
 
   // Send consolidated notifications for each date
   if (Object.keys(notificationsByDate).length > 0) {
-    const notificationSent = sendGroupedDiscordNotifications(notificationsByDate);
+    const notificationSent = sendGroupedDiscordNotifications(notificationsByDate, playerInfo);
 
     // Update status for rows that got reminders
     if (notificationSent) {

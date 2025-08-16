@@ -206,9 +206,10 @@ function sendDiscordSheetSetupNotification() {
  * This prevents multiple notifications for the same date
  *
  * @param {Object} notificationsByDate - Object with dates as keys and message groups as values
+ * @param {Object} playerInfo - Player information including discord handles and mention preferences
  * @returns {Boolean} - True if notifications were sent successfully
  */
-function sendGroupedDiscordNotifications(notificationsByDate) {
+function sendGroupedDiscordNotifications(notificationsByDate, playerInfo) {
   try {
     const webhookUrl = CONFIG.discordWebhookUrl;
     const channelMention = CONFIG.discordChannelMention;
@@ -248,11 +249,18 @@ function sendGroupedDiscordNotifications(notificationsByDate) {
             if (msg.reminderType === 'maybe') {
               messageContent += `${CONFIG.messages.discord.reminder}\n`;
 
-              // Add player mentions directly to this message
+              // Add player mentions directly to this message - check mention preference
               const maybePlayers = [];
               msg.players.forEach(player => {
                 if (player && player.trim() !== '') {
-                  maybePlayers.push(`<@${player}>`);
+                  const playerName = getPlayerNameFromDiscordId(player, playerInfo);
+                  const shouldMention = shouldMentionPlayer(player, playerInfo);
+
+                  if (shouldMention) {
+                    maybePlayers.push(`<@${player}>`);
+                  } else {
+                    maybePlayers.push(playerName || player);
+                  }
                 }
               });
 
@@ -263,11 +271,18 @@ function sendGroupedDiscordNotifications(notificationsByDate) {
             } else if (msg.reminderType === 'noResponse') {
               messageContent += `${CONFIG.messages.discord.reminderNoResponse}\n`;
 
-              // Add player mentions directly to this message
+              // Add player mentions directly to this message - check mention preference
               const noResponsePlayers = [];
               msg.players.forEach(player => {
                 if (player && player.trim() !== '') {
-                  noResponsePlayers.push(`<@${player}>`);
+                  const playerName = getPlayerNameFromDiscordId(player, playerInfo);
+                  const shouldMention = shouldMentionPlayer(player, playerInfo);
+
+                  if (shouldMention) {
+                    noResponsePlayers.push(`<@${player}>`);
+                  } else {
+                    noResponsePlayers.push(playerName || player);
+                  }
                 }
               });
 
@@ -287,7 +302,11 @@ function sendGroupedDiscordNotifications(notificationsByDate) {
               msg.players.forEach(playerName => {
                 const player = playerInfo[playerName];
                 if (player && player.discordHandle) {
-                  restrictionMentions.push(`<@${player.discordHandle}>`);
+                  if (player.allowMention) {
+                    restrictionMentions.push(`<@${player.discordHandle}>`);
+                  } else {
+                    restrictionMentions.push(playerName);
+                  }
                 }
               });
             }
@@ -329,4 +348,38 @@ function sendGroupedDiscordNotifications(notificationsByDate) {
     Logger.log(`Error sending grouped Discord notifications: ${error.toString()}`);
     return false;
   }
+}
+
+/**
+ * Check if player should be mentioned based on their preferences
+ * @param {string} discordId - Discord ID of the player
+ * @param {Object} playerInfo - Player info object containing preferences
+ * @returns {boolean} - True if player should be mentioned
+ */
+function shouldMentionPlayer(discordId, playerInfo) {
+  // Find player by discord ID
+  for (const playerName in playerInfo) {
+    const player = playerInfo[playerName];
+    if (player.discordHandle === discordId) {
+      // Only mention if they have both a discord handle AND have allowed mentions
+      return player.discordHandle && player.allowMention;
+    }
+  }
+  return false; // Default to false if player not found
+}
+
+/**
+ * Get player name from their discord ID
+ * @param {string} discordId - Discord ID of the player
+ * @param {Object} playerInfo - Player info object
+ * @returns {string} - Player name or null if not found
+ */
+function getPlayerNameFromDiscordId(discordId, playerInfo) {
+  for (const playerName in playerInfo) {
+    const player = playerInfo[playerName];
+    if (player.discordHandle === discordId) {
+      return playerName;
+    }
+  }
+  return null;
 }
