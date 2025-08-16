@@ -28,6 +28,20 @@ const CONFIG = {
   discordWebhookUrl: PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK'), // Add your Discord webhook URL here (e.g., "https://discord.com/api/webhooks/...")
   discordChannelMention: "@everyone", // Change to specific role mention if needed (e.g., "<@&ROLE_ID>")
 
+  // Player response constants
+  responses: {
+    yes: "y",
+    no: "n",
+    maybe: "?",
+    empty: ""
+  },
+
+  // Column identifiers
+  columns: {
+    today: "Today",
+    day: "Day"
+  },
+
   // --- Message Templates ---
   // Discord notification messages
   messages: {
@@ -77,7 +91,8 @@ const CONFIG = {
       eventScheduled: "Event scheduled on {date}",
       superseded: "Superseded by other event",
       failedDuration: "Failed: Duration < {minHours}h",
-      reminderSent: "Reminder sent on {date}"
+      reminderSent: "Reminder sent on {date}",
+      eventCreated: "Event created" // Added for checks in the code
     },
 
     // Data validation help text

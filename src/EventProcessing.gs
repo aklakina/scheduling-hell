@@ -126,12 +126,12 @@ function findRestrictingPlayers(validPlayerResponses, baseDate) {
     const response = player.response;
 
     // Skip players who said 'n' or have empty/invalid responses
-    if (response === 'n' || response === '' || response === '?') {
+    if (response === CONFIG.responses.no || response === CONFIG.responses.empty || response === CONFIG.responses.maybe) {
       continue;
     }
 
     // Skip players who said 'y' (they're available all day)
-    if (response === 'y') {
+    if (response === CONFIG.responses.yes) {
       continue;
     }
 
@@ -165,18 +165,18 @@ function calculateIntersectionForCombination(responses, baseDate) {
     const responseStr = String(response).trim().toLowerCase();
 
     // Skip empty responses and question marks - they don't affect intersection
-    if (responseStr === '' || responseStr === '?') {
+    if (responseStr === CONFIG.responses.empty || responseStr === CONFIG.responses.maybe) {
       allYResponses = false;
       continue;
     }
 
     // Skip 'n' responses - they make combination invalid
-    if (responseStr === 'n') {
+    if (responseStr === CONFIG.responses.no) {
       return { intersectionStart: undefined, intersectionEnd: undefined };
     }
 
     // Handle 'y' responses
-    if (responseStr === 'y') {
+    if (responseStr === CONFIG.responses.yes) {
       continue;
     }
 
@@ -260,19 +260,19 @@ function calculateIntersection(responses, baseDate) {
         const responseStr = response ? String(response).trim().toLowerCase() : '';
 
         // Skip empty responses and question marks - they don't affect intersection
-        if (responseStr === '' || responseStr === '?') {
+        if (responseStr === CONFIG.responses.empty || responseStr === CONFIG.responses.maybe) {
             allYResponses = false;
             continue;
         }
 
         // Skip 'n' responses - they don't affect intersection but make event unschedulable
-        if (responseStr === 'n') {
+        if (responseStr === CONFIG.responses.no) {
             allYResponses = false;
             continue;
         }
 
         // Handle 'y' responses
-        if (responseStr === 'y') {
+        if (responseStr === CONFIG.responses.yes) {
             allYResponses = allYResponses && true;
             continue;
         }
@@ -336,13 +336,13 @@ function analyzeRowResponses(sheet, editedRow, playerInfo, numPlayers, statusCol
       actualPlayerResponses++;
 
       const responseStr = response ? String(response).trim().toLowerCase() : '';
-      if (responseStr === 'n') {
+      if (responseStr === CONFIG.responses.no) {
         nFound = true;
-      } else if (responseStr === 'y') {
+      } else if (responseStr === CONFIG.responses.yes) {
         yCount++;
-      } else if (responseStr === '?') {
+      } else if (responseStr === CONFIG.responses.maybe) {
         questionMarkCount++;
-      } else if (responseStr === '') {
+      } else if (responseStr === CONFIG.responses.empty) {
         blankCount++;
       } else {
         // Check if it's a valid time range

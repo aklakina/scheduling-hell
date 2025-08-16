@@ -161,7 +161,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
   // Yes responses (green) - matches cells containing 'y'
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('Y')
+    .whenTextEqualTo(CONFIG.responses.yes.toUpperCase())
     .setBackground('#d4edda')
     .setFontColor('#155724')
     .setRanges([playerRange])
@@ -169,7 +169,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
   // No responses (red) - matches cells containing 'n'
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('N')
+    .whenTextEqualTo(CONFIG.responses.no.toUpperCase())
     .setBackground('#f8d7da')
     .setFontColor('#721c24')
     .setRanges([playerRange])
@@ -177,7 +177,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
   // Maybe responses (yellow) - matches cells containing '?'
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('?')
+    .whenTextEqualTo(CONFIG.responses.maybe.toUpperCase())
     .setBackground('#fff3cd')
     .setFontColor('#856404')
     .setRanges([playerRange])
@@ -198,7 +198,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Ready for scheduling (bright green)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Ready for scheduling')
+      .whenTextContains(CONFIG.messages.status.readyForScheduling)
       .setBackground('#28a745')
       .setFontColor('#ffffff')
       .setRanges([statusRange])
@@ -206,7 +206,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Event created (success green)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Event created')
+      .whenTextContains(CONFIG.messages.status.eventCreated)
       .setBackground('#20c997')
       .setFontColor('#ffffff')
       .setRanges([statusRange])
@@ -214,7 +214,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Cancelled (red)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Cancelled')
+      .whenTextContains(CONFIG.messages.status.cancelled.split(' ')[0]) // Just "Cancelled"
       .setBackground('#dc3545')
       .setFontColor('#ffffff')
       .setRanges([statusRange])
@@ -222,7 +222,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Failed (orange)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Failed')
+      .whenTextContains("Failed")
       .setBackground('#fd7e14')
       .setFontColor('#ffffff')
       .setRanges([statusRange])
@@ -230,7 +230,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Awaiting responses (yellow)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Awaiting responses')
+      .whenTextContains(CONFIG.messages.status.awaitingResponses)
       .setBackground('#ffc107')
       .setFontColor('#212529')
       .setRanges([statusRange])
@@ -238,7 +238,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Reminder sent (light blue)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Reminder sent')
+      .whenTextContains("Reminder sent")
       .setBackground('#17a2b8')
       .setFontColor('#ffffff')
       .setRanges([statusRange])
@@ -246,7 +246,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
     // Superseded (gray)
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextContains('Superseded')
+      .whenTextContains(CONFIG.messages.status.superseded)
       .setBackground('#6c757d')
       .setFontColor('#ffffff')
       .setRanges([statusRange])
@@ -281,7 +281,7 @@ function formatArchiveSheet() {
   // --- Remove Today column if it exists ---
   const headersRange = archiveSheet.getRange(CONFIG.headerRow, 1, 1, lastCol);
   const headers = headersRange.getValues()[0];
-  const todayColIndex = headers.findIndex(h => h.toString().includes('Today')) + 1;
+  const todayColIndex = headers.findIndex(h => h.toString().includes(CONFIG.columns.today)) + 1;
   if (todayColIndex > 0) {
     archiveSheet.deleteColumn(todayColIndex);
     // After deleting the column, we need to refetch lastCol and headers
@@ -400,7 +400,7 @@ function addArchiveConditionalFormatting(sheet, playerStartCol, playerEndCol, st
 
   // Muted yes responses
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains('y')
+    .whenTextContains(CONFIG.responses.yes)
     .setBackground('#e8f5e8')
     .setFontColor('#4a6741')
     .setRanges([playerRange])
@@ -408,17 +408,25 @@ function addArchiveConditionalFormatting(sheet, playerStartCol, playerEndCol, st
 
   // Muted no responses
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains('n')
+    .whenTextContains(CONFIG.responses.no)
     .setBackground('#f5e8e8')
     .setFontColor('#674141')
     .setRanges([playerRange])
     .build());
 
-  // Muted maybe responses
+  // Maybe responses
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains('?')
-    .setBackground('#f5f1e8')
-    .setFontColor('#675d41')
+    .whenTextEqualTo(CONFIG.responses.maybe.toUpperCase())
+    .setBackground('#fff3cd')
+    .setFontColor('#856404')
+    .setRanges([playerRange])
+    .build());
+
+  // --- Time range duration-based conditional formatting ---
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(`=REGEXMATCH(INDIRECT(ADDRESS(ROW();COLUMN())); "^[\\d:]+(-[\\d:]+)?$")`)
+    .setBackground('#d4edda')
+    .setFontColor('#155724')
     .setRanges([playerRange])
     .build());
 

@@ -138,7 +138,7 @@ function onEditFeedback(e) {
   }
 
   // Find Today column index to exclude it from processing
-  const todayColIndex = headers.findIndex(h => h.toString().includes('Today')) + 1;
+  const todayColIndex = headers.findIndex(h => h.toString().includes(CONFIG.columns.today)) + 1;
 
   // Only process edits in player columns (between firstPlayerColumn and status column)
   // Exclude the Today column from processing
@@ -167,7 +167,7 @@ function onEditFeedback(e) {
   const dateCell = sheet.getRange(editedRow, CONFIG.dateColumn).getValue();
   const date = new Date(dateCell);
 
-  if (!['y', 'n', '?', ''].includes(value)) {
+  if (![CONFIG.responses.yes, CONFIG.responses.no, CONFIG.responses.maybe, CONFIG.responses.empty].includes(value)) {
     if (isNaN(date.getTime())) {
       ui.alert(CONFIG.messages.ui.invalidDate);
       return;
@@ -281,7 +281,7 @@ function checkAndScheduleEvents() {
     // Find the best schedulable event for the week
     eventsByWeek[week].forEach(event => {
       const status = event.rowData[statusColumnIndex - 1];
-      if (status === "Ready for scheduling") {
+      if (status === CONFIG.messages.status.readyForScheduling) {
         const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
         const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
 
@@ -315,7 +315,7 @@ function checkAndScheduleEvents() {
 
       // Check both "Awaiting responses" AND "Ready for scheduling" events
       // Ready events might still need notifications if they fail the 4-hour requirement
-      if (status === "Awaiting responses" || status === "Ready for scheduling") {
+      if (status === CONFIG.messages.status.awaitingResponses || status === CONFIG.messages.status.readyForScheduling) {
         const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
         const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
 
@@ -354,8 +354,8 @@ function checkAndScheduleEvents() {
       eventsByWeek[week].forEach(event => {
           if(event.rowIndex !== bestEvent.rowIndex) {
               const currentStatus = responseSheet.getRange(event.rowIndex, statusColumnIndex).getValue() || '';
-              if (!currentStatus.startsWith('Event created') && !currentStatus.startsWith('Cancelled')) {
-                responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue('Superseded by other event');
+              if (!currentStatus.startsWith(CONFIG.messages.status.eventCreated) && !currentStatus.startsWith('Cancelled')) {
+                responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue(CONFIG.messages.status.superseded);
               }
           }
       });
@@ -364,7 +364,8 @@ function checkAndScheduleEvents() {
       // No event could be scheduled. Now check why.
       if (failedReadyEvents.length > 0) {
         failedReadyEvents.forEach(rowIndex => {
-          responseSheet.getRange(rowIndex, statusColumnIndex).setValue(`Failed: Duration < ${CONFIG.minEventDurationHours}h`);
+          const failureMessage = CONFIG.messages.status.failedDuration.replace('{minHours}', CONFIG.minEventDurationHours);
+          responseSheet.getRange(rowIndex, statusColumnIndex).setValue(failureMessage);
         });
         Logger.log(`Marked ${failedReadyEvents.length} events as failed due to short duration for week ${week}.`);
       }
@@ -372,7 +373,7 @@ function checkAndScheduleEvents() {
       // Collect reminder emails for "Awaiting" events, separating by response type
       eventsByWeek[week].forEach(event => {
         const status = event.rowData[statusColumnIndex - 1];
-        if (status === "Awaiting responses") {
+        if (status === CONFIG.messages.status.awaitingResponses) {
           const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
 
           // Count Y responses to determine if we should send reminders
@@ -381,7 +382,7 @@ function checkAndScheduleEvents() {
             const playerName = allPlayerNames[i];
             if (playerName && playerInfo[playerName]) {
               const responseStr = response ? String(response).trim().toLowerCase() : '';
-              if (responseStr === 'y') {
+              if (responseStr === CONFIG.responses.yes) {
                 yCount++;
               }
             }
@@ -396,10 +397,10 @@ function checkAndScheduleEvents() {
               const playerName = allPlayerNames[i];
               if (playerName && playerInfo[playerName] && playerInfo[playerName].discordHandle) {
                 const responseStr = response ? String(response).trim().toLowerCase() : '';
-                if (responseStr === '?') {
+                if (responseStr === CONFIG.responses.maybe) {
                   // Player answered "maybe"
                   globalMaybeEmails.add(playerInfo[playerName].discordHandle);
-                } else if (responseStr === '') {
+                } else if (responseStr === CONFIG.responses.empty) {
                   // Player didn't respond at all
                   globalNoResponseEmails.add(playerInfo[playerName].discordHandle);
                 }
@@ -435,13 +436,13 @@ function checkAndScheduleEvents() {
     for (const week in eventsByWeek) {
       eventsByWeek[week].forEach(event => {
         const status = event.rowData[statusColumnIndex - 1];
-        if (status === 'Awaiting responses') {
+        if (status === CONFIG.messages.status.awaitingResponses) {
           // Check if any player in this row needed a reminder
           const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
           let hasReminderRecipient = false;
           allResponses.forEach((response, i) => {
             const responseStr = response ? String(response).trim().toLowerCase() : '';
-            if (responseStr === '?' || responseStr === '') {
+            if (responseStr === CONFIG.responses.maybe || responseStr === CONFIG.responses.empty) {
               const playerName = allPlayerNames[i];
               if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
                 hasReminderRecipient = true;
@@ -470,3 +471,4 @@ function checkAndScheduleEvents() {
     // Don't fail the main function if these operations fail
   }
 }
+
