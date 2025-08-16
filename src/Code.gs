@@ -269,6 +269,9 @@ function checkAndScheduleEvents() {
     eventsByWeek[weekNumber].push(event);
   });
 
+  // --- NEW: Create data structure to collect notifications by date ---
+  const notificationsByDate = {};
+
   // --- Process each week ---
   const globalMaybeEmails = new Set(); // Players who answered "?"
   const globalNoResponseEmails = new Set(); // Players who didn't respond at all
@@ -327,25 +330,45 @@ function checkAndScheduleEvents() {
             optimalCombination.duration >= CONFIG.minEventDurationHours &&
             optimalCombination.restrictingPlayers.length > 0) {
 
-          // Send notification to restricting players
-          const notificationSent = sendDiscordDurationRestrictionNotification(
-            optimalCombination.restrictingPlayers,
-            eventDate,
-            optimalCombination.duration,
-            playerInfo
-          );
-
-          if (notificationSent) {
-            Logger.log(`Sent duration restriction notification for ${eventDate.toLocaleDateString()} to players: ${optimalCombination.restrictingPlayers.join(', ')}`);
+          // Instead of sending immediately, collect for grouped notification
+          const dateString = eventDate.toLocaleDateString();
+          if (!notificationsByDate[dateString]) {
+            notificationsByDate[dateString] = {
+              date: eventDate,
+              messages: []
+            };
           }
+
+          // Add restriction message for this date
+          notificationsByDate[dateString].messages.push({
+            type: 'restriction',
+            players: optimalCombination.restrictingPlayers,
+            duration: optimalCombination.duration
+          });
+
+          Logger.log(`Queued duration restriction notification for ${dateString} to players: ${optimalCombination.restrictingPlayers.join(', ')}`);
         }
       }
     });
 
     // If a best event was found, schedule it and update status for the whole week
     if (bestEvent) {
-      // Send Discord notification for the scheduled event
-      sendDiscordEventNotification(bestEvent.date, bestEvent.start, bestEvent.end, eventTitleFromSheet, eventLink);
+      // Queue Discord notification for scheduled event instead of sending immediately
+      const dateString = bestEvent.date.toLocaleDateString();
+      if (!notificationsByDate[dateString]) {
+        notificationsByDate[dateString] = {
+          date: bestEvent.date,
+          messages: []
+        };
+      }
+
+      notificationsByDate[dateString].messages.push({
+        type: 'event',
+        start: bestEvent.start,
+        end: bestEvent.end,
+        eventTitle: eventTitleFromSheet,
+        eventLink: eventLink
+      });
 
       responseSheet.getRange(bestEvent.rowIndex, statusColumnIndex).setValue(`Event scheduled on ${today.toLocaleDateString()}`);
       Logger.log(`Scheduled best event for week ${week} on ${bestEvent.date.toLocaleDateString()}.`);
@@ -374,6 +397,7 @@ function checkAndScheduleEvents() {
       eventsByWeek[week].forEach(event => {
         const status = event.rowData[statusColumnIndex - 1];
         if (status === CONFIG.messages.status.awaitingResponses) {
+          const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
           const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
 
           // Count Y responses to determine if we should send reminders
@@ -382,7 +406,7 @@ function checkAndScheduleEvents() {
             const playerName = allPlayerNames[i];
             if (playerName && playerInfo[playerName]) {
               const responseStr = response ? String(response).trim().toLowerCase() : '';
-              if (responseStr === CONFIG.responses.yes) {
+              if (responseStr === CONFIG.responses.yes || isTime(responseStr).isValid) {
                 yCount++;
               }
             }
@@ -391,7 +415,7 @@ function checkAndScheduleEvents() {
           // Calculate minimum Y responses needed based on percentage of total players
           const minYResponsesNeeded = Math.ceil(numPlayers * CONFIG.reminderThresholdPercentage);
 
-          // Only send reminders if there are enough Y answers
+          // Only send reminders if there are enough Y or time responses
           if (yCount >= minYResponsesNeeded) {
             allResponses.forEach((response, i) => {
               const playerName = allPlayerNames[i];
@@ -406,55 +430,89 @@ function checkAndScheduleEvents() {
                 }
               }
             });
-          }
-        }
-      });
-    }
-  }
 
-  // Send separate targeted reminders for each group
-  let remindersUpdated = false;
-
-  if (globalMaybeEmails.size > 0) {
-    const maybeReminderSent = sendDiscordReminder(globalMaybeEmails, 'maybe');
-    if (maybeReminderSent) {
-      Logger.log(`Sent "maybe" reminders to ${globalMaybeEmails.size} players who answered "?"`);
-      remindersUpdated = true;
-    }
-  }
-
-  if (globalNoResponseEmails.size > 0) {
-    const noResponseReminderSent = sendDiscordReminder(globalNoResponseEmails, 'noResponse');
-    if (noResponseReminderSent) {
-      Logger.log(`Sent "no response" reminders to ${globalNoResponseEmails.size} players who didn't respond`);
-      remindersUpdated = true;
-    }
-  }
-
-  // Update status for all reminded rows across all weeks
-  if (remindersUpdated) {
-    for (const week in eventsByWeek) {
-      eventsByWeek[week].forEach(event => {
-        const status = event.rowData[statusColumnIndex - 1];
-        if (status === CONFIG.messages.status.awaitingResponses) {
-          // Check if any player in this row needed a reminder
-          const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
-          let hasReminderRecipient = false;
-          allResponses.forEach((response, i) => {
-            const responseStr = response ? String(response).trim().toLowerCase() : '';
-            if (responseStr === CONFIG.responses.maybe || responseStr === CONFIG.responses.empty) {
-              const playerName = allPlayerNames[i];
-              if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
-                hasReminderRecipient = true;
-              }
+            // Mark this date for reminder notifications
+            const dateString = eventDate.toLocaleDateString();
+            if (!notificationsByDate[dateString]) {
+              notificationsByDate[dateString] = {
+                date: eventDate,
+                messages: []
+              };
             }
-          });
-
-          if (hasReminderRecipient) {
-            responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue(`Reminder sent on ${today.toLocaleDateString()}`);
+          } else {
+            // NEW: Mark dates without enough responses with "Not enough responses" status
+            responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue(`Not enough responses (${yCount}/${minYResponsesNeeded} required)`);
           }
         }
       });
+    }
+  }
+
+  // Add reminder messages to notification groups if needed
+  if (globalMaybeEmails.size > 0 || globalNoResponseEmails.size > 0) {
+    // Find dates that need reminders
+    Object.keys(notificationsByDate).forEach(dateString => {
+      let hasReminderMessage = false;
+
+      // Add "maybe" reminder if needed
+      if (globalMaybeEmails.size > 0) {
+        notificationsByDate[dateString].messages.push({
+          type: 'reminder',
+          reminderType: 'maybe',
+          players: [...globalMaybeEmails]
+        });
+        hasReminderMessage = true;
+      }
+
+      // Add "no response" reminder if needed
+      if (globalNoResponseEmails.size > 0) {
+        notificationsByDate[dateString].messages.push({
+          type: 'reminder',
+          reminderType: 'noResponse',
+          players: [...globalNoResponseEmails]
+        });
+        hasReminderMessage = true;
+      }
+
+      Logger.log(`Added reminder notification for date ${dateString}`);
+    });
+  }
+
+  // Send consolidated notifications for each date
+  if (Object.keys(notificationsByDate).length > 0) {
+    const notificationSent = sendGroupedDiscordNotifications(notificationsByDate);
+
+    // Update status for rows that got reminders
+    if (notificationSent) {
+      for (const week in eventsByWeek) {
+        eventsByWeek[week].forEach(event => {
+          const status = event.rowData[statusColumnIndex - 1];
+          const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
+          const dateString = eventDate.toLocaleDateString();
+
+          if (status === CONFIG.messages.status.awaitingResponses &&
+              notificationsByDate[dateString] &&
+              notificationsByDate[dateString].sentReminders) {
+
+            // Check if any player in this row needed a reminder
+            const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
+            let hasReminderRecipient = false;
+            allResponses.forEach((response, i) => {
+              const responseStr = response ? String(response).trim().toLowerCase() : '';
+              if (responseStr === CONFIG.responses.maybe || responseStr === CONFIG.responses.empty) {
+                const playerName = allPlayerNames[i];
+                if (playerInfo[playerName] && playerInfo[playerName].discordHandle) {
+                  hasReminderRecipient = true;
+                }
+              }
+            });
+
+            if (hasReminderRecipient) {
+              responseSheet.getRange(event.rowIndex, statusColumnIndex).setValue(`Reminder sent on ${today.toLocaleDateString()}`);
+            }
+          }
+        });
+      }
     }
   }
 
@@ -471,4 +529,3 @@ function checkAndScheduleEvents() {
     // Don't fail the main function if these operations fail
   }
 }
-

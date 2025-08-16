@@ -3,16 +3,33 @@
  */
 
 /**
+ * Checks if a string is a valid time format and returns regex patterns and matches.
+ * @param {string} str - The string to check
+ * @returns {Object} Object containing regex patterns and match results
+ */
+function isTime(str) {
+  const rangeRegex = /^(\d{1,2}(?::\d{2})?)-(\d{1,2}(?::\d{2})?)$/;
+  const singleTimeRegex = /^(\d{1,2}(?::\d{2})?)$/;
+
+  str = String(str).replace(/\s/g, '');
+
+  const rangeMatch = str.match(rangeRegex);
+  const singleMatch = str.match(singleTimeRegex);
+
+  return {
+    isValid: Boolean(rangeMatch || singleMatch),
+    rangeRegex,
+    singleTimeRegex,
+    rangeMatch,
+    singleMatch
+  };
+}
+
+/**
  * Parses a string to extract a start and end time.
  */
 function parseTimeRange(timeStr, baseDate) {
-  timeStr = String(timeStr).replace(/\s/g, '');
-
-  // Updated regex patterns to handle seconds and be more flexible
-  // Supports: HH, HH:MM for both single times and ranges
-  const rangeRegex = /^(\d{1,2}(?::\d{2})?)-(\d{1,2}(?::\d{2})?)$/;
-  const singleTimeRegex = /^(\d{1,2}(?::\d{2})?)$/;
-  let match;
+  const timeCheck = isTime(timeStr);
 
   const createDate = (timePart) => {
     const newDate = new Date(baseDate);
@@ -31,12 +48,12 @@ function parseTimeRange(timeStr, baseDate) {
     return newDate;
   };
 
-  if ((match = timeStr.match(rangeRegex))) {
-    const start = createDate(match[1]);
-    const end = createDate(match[2]);
+  if (timeCheck.rangeMatch) {
+    const start = createDate(timeCheck.rangeMatch[1]);
+    const end = createDate(timeCheck.rangeMatch[2]);
     if (start && end && start < end) return { start, end };
-  } else if ((match = timeStr.match(singleTimeRegex))) {
-    const start = createDate(match[1]);
+  } else if (timeCheck.singleMatch) {
+    const start = createDate(timeCheck.singleMatch[1]);
     if (start) {
       const end = new Date(start);
       end.setHours(start.getHours() + CONFIG.shortEventWarningHours);

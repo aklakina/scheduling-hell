@@ -92,7 +92,8 @@ const CONFIG = {
       superseded: "Superseded by other event",
       failedDuration: "Failed: Duration < {minHours}h",
       reminderSent: "Reminder sent on {date}",
-      eventCreated: "Event created" // Added for checks in the code
+      eventCreated: "Event created", // Added for checks in the code
+      notEnoughResponses: "Not enough responses ({current}/{required} required)" // New status for insufficient response rate
     },
 
     // Data validation help text

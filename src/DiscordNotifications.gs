@@ -200,3 +200,115 @@ function sendDiscordSheetSetupNotification() {
     return false;
   }
 }
+
+/**
+ * Send grouped Discord notifications organized by date
+ * This prevents multiple notifications for the same date
+ *
+ * @param {Object} notificationsByDate - Object with dates as keys and message groups as values
+ * @returns {Boolean} - True if notifications were sent successfully
+ */
+function sendGroupedDiscordNotifications(notificationsByDate) {
+  try {
+    const webhookUrl = CONFIG.discordWebhookUrl;
+    const channelMention = CONFIG.discordChannelMention;
+
+    if (!webhookUrl) {
+      Logger.log(`Discord webhook URL is not set. Skipping grouped notifications.`);
+      return false;
+    }
+
+    // Process each date's notifications
+    for (const dateString in notificationsByDate) {
+      const dateInfo = notificationsByDate[dateString];
+      const dateMessages = dateInfo.messages || [];
+
+      if (dateMessages.length === 0) continue;
+
+      // Build a consolidated message for this date
+      let messageContent = `**📅 ${dateString}**\n\n`;
+      let sentReminders = false;
+      let mentionedPlayers = new Set();
+
+      // Process each message type for this date
+      dateMessages.forEach(msg => {
+        switch (msg.type) {
+          case 'event':
+            const eventTime = msg.start ? ` from ${msg.start.toLocaleTimeString()}` : '';
+            const eventEndTime = msg.end ? ` to ${msg.end.toLocaleTimeString()}` : '';
+            const fullEventTitle = `${msg.eventTitle}${eventTime}${eventEndTime}`;
+            const eventLinkMessage = msg.eventLink ? `\nEvent Link: ${msg.eventLink}` : '';
+
+            messageContent += `🎉 **Event Scheduled**: ${fullEventTitle}${eventLinkMessage}\n\n`;
+            break;
+
+          case 'reminder':
+            // Add different reminder messages based on type
+            if (msg.reminderType === 'maybe') {
+              messageContent += `${CONFIG.messages.discord.reminder}\n`;
+              msg.players.forEach(player => mentionedPlayers.add(player));
+              sentReminders = true;
+            } else if (msg.reminderType === 'noResponse') {
+              messageContent += `${CONFIG.messages.discord.reminderNoResponse}\n`;
+              msg.players.forEach(player => mentionedPlayers.add(player));
+              sentReminders = true;
+            }
+            break;
+
+          case 'restriction':
+            messageContent += `${CONFIG.messages.discord.durationRestriction}\n`;
+            // Add player mentions for restriction notices
+            if (msg.players && msg.players.length > 0) {
+              msg.players.forEach(playerName => {
+                const player = playerInfo[playerName];
+                if (player && player.discordHandle) {
+                  mentionedPlayers.add(player.discordHandle);
+                }
+              });
+            }
+            break;
+        }
+      });
+
+      // Create Discord mentions
+      const discordMentions = [];
+      mentionedPlayers.forEach(discordId => {
+        if (discordId && discordId.trim() !== '') {
+          discordMentions.push(`<@${discordId}>`);
+        }
+      });
+
+      // Add mention text if we have specific players to mention
+      if (discordMentions.length > 0) {
+        messageContent += `${discordMentions.join(' ')}`;
+      } else {
+        // Otherwise, add the channel mention (e.g., @everyone)
+        messageContent += channelMention;
+      }
+
+      // Send the consolidated message for this date
+      const payload = JSON.stringify({
+        content: messageContent,
+        username: CONFIG.messages.discord.botUsername,
+        avatar_url: CONFIG.messages.discord.botAvatarUrl
+      });
+
+      const options = {
+        method: "post",
+        contentType: "application/json",
+        payload: payload
+      };
+
+      UrlFetchApp.fetch(webhookUrl, options);
+      Logger.log(`Sent grouped Discord notification for date: ${dateString} with ${dateMessages.length} message types`);
+
+      // Mark if we sent reminders for this date
+      notificationsByDate[dateString].sentReminders = sentReminders;
+    }
+
+    return true;
+  } catch (error) {
+    Logger.log(`Error sending grouped Discord notifications: ${error.toString()}`);
+    return false;
+  }
+}
