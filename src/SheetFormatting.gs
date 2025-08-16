@@ -253,6 +253,13 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
       .build());
   }
 
+  // Highlight rows where the Date column equals TODAY()
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(`=INDIRECT("R"&ROW()&"C${CONFIG.dateColumn}";FALSE)=TODAY()`)
+    .setBackground('#e6f2ff') // Light blue highlight for today's row
+    .setRanges([sheet.getRange(CONFIG.firstDataRow, 1, lastRow - CONFIG.firstDataRow + 1, sheet.getLastColumn())])
+    .build());
+
   sheet.setConditionalFormatRules(rules);
 }
 

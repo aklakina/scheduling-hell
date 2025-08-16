@@ -361,7 +361,7 @@ function analyzeRowResponses(sheet, editedRow, playerInfo, numPlayers, statusCol
     statusCell.setValue(CONFIG.messages.status.cancelled);
   } else if (yCount + timeResponsesCount === numPlayers && actualPlayerResponses === numPlayers) {
     statusCell.setValue(CONFIG.messages.status.readyForScheduling);
-  } else if (blankCount > 0 || questionMarkCount > 0) {
+  } else if ((blankCount > 0 || questionMarkCount > 0) && yCount + timeResponsesCount < numPlayers && actualPlayerResponses > 0) {
     statusCell.setValue(CONFIG.messages.status.awaitingResponses);
   } else {
     statusCell.setValue(""); // Clear status if state is indeterminate
