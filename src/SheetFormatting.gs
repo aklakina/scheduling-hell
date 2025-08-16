@@ -183,11 +183,11 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
     .setRanges([playerRange])
     .build());
 
-  // Time range responses (blue) - matches cells that start with a number (time ranges)
+  // --- Time range duration-based conditional formatting ---
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=REGEXMATCH(INDIRECT(ADDRESS(ROW();COLUMN())); "^[\\d:]+(-[\\d:]+)?$")')
-    .setBackground('#cce5ff')
-    .setFontColor('#0056b3')
+    .whenFormulaSatisfied(`=REGEXMATCH(INDIRECT(ADDRESS(ROW();COLUMN())); "^[\\d:]+(-[\\d:]+)?$")`)
+    .setBackground('#d4edda')
+    .setFontColor('#155724')
     .setRanges([playerRange])
     .build());
 
