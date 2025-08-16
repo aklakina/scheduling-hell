@@ -273,8 +273,8 @@ function checkAndScheduleEvents() {
   const notificationsByDate = {};
 
   // --- Process each week ---
-  const globalMaybeEmails = new Set(); // Players who answered "?"
-  const globalNoResponseEmails = new Set(); // Players who didn't respond at all
+  // Replace global reminders with per-date tracking
+  const remindersByDate = {};
 
   for (const week in eventsByWeek) {
     let bestEvent = null;
@@ -398,7 +398,17 @@ function checkAndScheduleEvents() {
         const status = event.rowData[statusColumnIndex - 1];
         if (status === CONFIG.messages.status.awaitingResponses) {
           const eventDate = new Date(event.rowData[CONFIG.dateColumn - 1]);
+          const dateString = eventDate.toLocaleDateString();
           const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();
+
+          // Initialize tracking for this date if needed
+          if (!remindersByDate[dateString]) {
+            remindersByDate[dateString] = {
+              date: eventDate,
+              maybeEmails: new Set(),
+              noResponseEmails: new Set()
+            };
+          }
 
           // Count Y responses to determine if we should send reminders
           let yCount = 0;
@@ -415,24 +425,25 @@ function checkAndScheduleEvents() {
           // Calculate minimum Y responses needed based on percentage of total players
           const minYResponsesNeeded = Math.ceil(numPlayers * CONFIG.reminderThresholdPercentage);
 
-          // Only send reminders if there are enough Y or time responses
+          // Only collect reminders if there are enough Y or time responses
           if (yCount >= minYResponsesNeeded) {
+            // Track maybe and no-response players separately for this date
             allResponses.forEach((response, i) => {
               const playerName = allPlayerNames[i];
               if (playerName && playerInfo[playerName] && playerInfo[playerName].discordHandle) {
                 const responseStr = response ? String(response).trim().toLowerCase() : '';
+
                 if (responseStr === CONFIG.responses.maybe) {
                   // Player answered "maybe"
-                  globalMaybeEmails.add(playerInfo[playerName].discordHandle);
+                  remindersByDate[dateString].maybeEmails.add(playerInfo[playerName].discordHandle);
                 } else if (responseStr === CONFIG.responses.empty) {
                   // Player didn't respond at all
-                  globalNoResponseEmails.add(playerInfo[playerName].discordHandle);
+                  remindersByDate[dateString].noResponseEmails.add(playerInfo[playerName].discordHandle);
                 }
               }
             });
 
-            // Mark this date for reminder notifications
-            const dateString = eventDate.toLocaleDateString();
+            // Mark this date for possible notifications
             if (!notificationsByDate[dateString]) {
               notificationsByDate[dateString] = {
                 date: eventDate,
@@ -448,34 +459,35 @@ function checkAndScheduleEvents() {
     }
   }
 
-  // Add reminder messages to notification groups if needed
-  if (globalMaybeEmails.size > 0 || globalNoResponseEmails.size > 0) {
-    // Find dates that need reminders
-    Object.keys(notificationsByDate).forEach(dateString => {
-      let hasReminderMessage = false;
+  // Add reminder messages to notification groups based on per-date tracking
+  for (const dateString in remindersByDate) {
+    const dateReminders = remindersByDate[dateString];
 
-      // Add "maybe" reminder if needed
-      if (globalMaybeEmails.size > 0) {
+    // Only add notifications if we have this date in the notifications list
+    if (notificationsByDate[dateString]) {
+      // Add "maybe" reminder only if we have maybe responses AND NO empty responses
+      if (dateReminders.maybeEmails.size > 0 && dateReminders.noResponseEmails.size === 0) {
         notificationsByDate[dateString].messages.push({
           type: 'reminder',
           reminderType: 'maybe',
-          players: [...globalMaybeEmails]
+          players: [...dateReminders.maybeEmails]
         });
-        hasReminderMessage = true;
       }
 
-      // Add "no response" reminder if needed
-      if (globalNoResponseEmails.size > 0) {
+      // Always add "no response" reminder if needed
+      if (dateReminders.noResponseEmails.size > 0) {
         notificationsByDate[dateString].messages.push({
           type: 'reminder',
           reminderType: 'noResponse',
-          players: [...globalNoResponseEmails]
+          players: [...dateReminders.noResponseEmails]
         });
-        hasReminderMessage = true;
       }
 
-      Logger.log(`Added reminder notification for date ${dateString}`);
-    });
+      // Track if this date has any reminders for status updates later
+      notificationsByDate[dateString].hasReminders =
+        (dateReminders.maybeEmails.size > 0 && dateReminders.noResponseEmails.size === 0) ||
+        dateReminders.noResponseEmails.size > 0;
+    }
   }
 
   // Send consolidated notifications for each date
@@ -492,7 +504,7 @@ function checkAndScheduleEvents() {
 
           if (status === CONFIG.messages.status.awaitingResponses &&
               notificationsByDate[dateString] &&
-              notificationsByDate[dateString].sentReminders) {
+              notificationsByDate[dateString].hasReminders) {
 
             // Check if any player in this row needed a reminder
             const allResponses = responseSheet.getRange(event.rowIndex, CONFIG.firstPlayerColumn, 1, numPlayerColumns).getValues().flat();

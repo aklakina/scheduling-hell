@@ -228,7 +228,6 @@ function sendGroupedDiscordNotifications(notificationsByDate) {
       // Build a consolidated message for this date
       let messageContent = `**📅 ${dateString}**\n\n`;
       let sentReminders = false;
-      let mentionedPlayers = new Set();
 
       // Process each message type for this date
       dateMessages.forEach(msg => {
@@ -239,52 +238,71 @@ function sendGroupedDiscordNotifications(notificationsByDate) {
             const fullEventTitle = `${msg.eventTitle}${eventTime}${eventEndTime}`;
             const eventLinkMessage = msg.eventLink ? `\nEvent Link: ${msg.eventLink}` : '';
 
-            messageContent += `🎉 **Event Scheduled**: ${fullEventTitle}${eventLinkMessage}\n\n`;
+            messageContent += `🎉 **Event Scheduled**: ${fullEventTitle}${eventLinkMessage}\n`;
+            // Add channel mention for event notifications
+            messageContent += `${channelMention}\n\n`;
             break;
 
           case 'reminder':
             // Add different reminder messages based on type
             if (msg.reminderType === 'maybe') {
               messageContent += `${CONFIG.messages.discord.reminder}\n`;
-              msg.players.forEach(player => mentionedPlayers.add(player));
+
+              // Add player mentions directly to this message
+              const maybePlayers = [];
+              msg.players.forEach(player => {
+                if (player && player.trim() !== '') {
+                  maybePlayers.push(`<@${player}>`);
+                }
+              });
+
+              if (maybePlayers.length > 0) {
+                messageContent += `${maybePlayers.join(' ')}\n\n`;
+              }
               sentReminders = true;
             } else if (msg.reminderType === 'noResponse') {
               messageContent += `${CONFIG.messages.discord.reminderNoResponse}\n`;
-              msg.players.forEach(player => mentionedPlayers.add(player));
+
+              // Add player mentions directly to this message
+              const noResponsePlayers = [];
+              msg.players.forEach(player => {
+                if (player && player.trim() !== '') {
+                  noResponsePlayers.push(`<@${player}>`);
+                }
+              });
+
+              if (noResponsePlayers.length > 0) {
+                messageContent += `${noResponsePlayers.join(' ')}\n\n`;
+              }
               sentReminders = true;
             }
             break;
 
           case 'restriction':
             messageContent += `${CONFIG.messages.discord.durationRestriction}\n`;
-            // Add player mentions for restriction notices
+
+            // Add player mentions for restriction notices directly to this message
+            const restrictionMentions = [];
             if (msg.players && msg.players.length > 0) {
               msg.players.forEach(playerName => {
                 const player = playerInfo[playerName];
                 if (player && player.discordHandle) {
-                  mentionedPlayers.add(player.discordHandle);
+                  restrictionMentions.push(`<@${player.discordHandle}>`);
                 }
               });
+            }
+
+            if (restrictionMentions.length > 0) {
+              messageContent += `${restrictionMentions.join(' ')}\n\n`;
+            } else {
+              messageContent += '\n';
             }
             break;
         }
       });
 
-      // Create Discord mentions
-      const discordMentions = [];
-      mentionedPlayers.forEach(discordId => {
-        if (discordId && discordId.trim() !== '') {
-          discordMentions.push(`<@${discordId}>`);
-        }
-      });
-
-      // Add mention text if we have specific players to mention
-      if (discordMentions.length > 0) {
-        messageContent += `${discordMentions.join(' ')}`;
-      } else {
-        // Otherwise, add the channel mention (e.g., @everyone)
-        messageContent += channelMention;
-      }
+      // Remove any trailing newlines if they exist
+      messageContent = messageContent.trimEnd();
 
       // Send the consolidated message for this date
       const payload = JSON.stringify({
