@@ -157,11 +157,11 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
   // Player response conditional formatting
   const playerRange = sheet.getRange(CONFIG.firstDataRow, playerStartCol,
                                    lastRow - CONFIG.firstDataRow + 1,
-                                   playerEndCol - playerStartCol + 1);
+                                   playerEndCol - playerStartCol);
 
   // Yes responses (green) - matches cells containing 'y'
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains('y')
+    .whenTextEqualTo('Y')
     .setBackground('#d4edda')
     .setFontColor('#155724')
     .setRanges([playerRange])
@@ -169,7 +169,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
   // No responses (red) - matches cells containing 'n'
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains('n')
+    .whenTextEqualTo('N')
     .setBackground('#f8d7da')
     .setFontColor('#721c24')
     .setRanges([playerRange])
@@ -177,7 +177,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
   // Maybe responses (yellow) - matches cells containing '?'
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains('?')
+    .whenTextEqualTo('?')
     .setBackground('#fff3cd')
     .setFontColor('#856404')
     .setRanges([playerRange])
@@ -185,7 +185,7 @@ function addConditionalFormattingRules(sheet, playerStartCol, playerEndCol, stat
 
   // Time range responses (blue) - matches cells that start with a number (time ranges)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))), REGEXMATCH(INDIRECT(ADDRESS(ROW(),COLUMN())), "^[0-9]"))')
+    .whenFormulaSatisfied('=REGEXMATCH(INDIRECT(ADDRESS(ROW();COLUMN())); "^[\\d:]+(-[\\d:]+)?$")')
     .setBackground('#cce5ff')
     .setFontColor('#0056b3')
     .setRanges([playerRange])
