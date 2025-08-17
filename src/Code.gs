@@ -19,9 +19,8 @@ function onOpen() {
     .createMenu('Scheduler')
     .addItem('Setup Sheet', 'setupSheet')
     .addSeparator()
-    .addItem('Run Monthly Check', 'checkAndScheduleEvents')
     .addItem('🔄 Run Daily Check', 'dailySchedulingCheck')
-    .addItem('📅 Run Bi-Weekly Notifications', 'biWeeklyNotifications')
+    .addItem('🗓️ Test Bi-Weekly Mode', 'testBiWeeklyMode')
     .addSeparator()
     .addItem('🎨 Format Response Sheet', 'formatResponseSheet')
     .addItem('🎨 Format Archive Sheet', 'formatArchiveSheet')
@@ -557,9 +556,10 @@ function checkAndScheduleEvents() {
 }
 
 /**
- * TRIGGER 2A: DAILY SCHEDULING CHECK
- * Entry point for daily triggers. Uses the existing checkAndScheduleEvents flow
- * but with daily-specific processing window and notification controls.
+ * MAIN TRIGGER: DAILY SCHEDULING CHECK
+ * Entry point for the daily trigger. Handles both daily operations and bi-weekly notifications.
+ * On regular days: Uses daily processing window for event scheduling
+ * On bi-weekly Mondays: Uses bi-weekly processing window for notifications and reminders
  */
 function dailySchedulingCheck() {
   if (!CONFIG.triggers.daily.enabled) {
@@ -567,48 +567,34 @@ function dailySchedulingCheck() {
     return;
   }
 
-  Logger.log('Running daily scheduling check...');
-  checkAndScheduleEventsWithTrigger('daily');
-}
-
-/**
- * TRIGGER 2B: BI-WEEKLY MONDAY NOTIFICATIONS
- * Entry point for bi-weekly Monday notifications. Uses the existing checkAndScheduleEvents flow
- * but with bi-weekly-specific processing window and notification controls.
- */
-function biWeeklyNotifications() {
-  if (!CONFIG.triggers.biWeekly.enabled) {
-    Logger.log('Bi-weekly notifications are disabled in configuration.');
-    return;
-  }
-
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Check if we should run bi-weekly notifications today
-  if (!shouldRunBiWeeklyNotifications(today)) {
-    Logger.log(`Today (${today.toLocaleDateString()}) is not a bi-weekly Monday. Skipping notifications.`);
-    return;
+  // Check if today is a bi-weekly Monday
+  const isBiWeeklyMonday = shouldRunBiWeeklyNotifications(today);
+
+  if (isBiWeeklyMonday) {
+    // Check if we already ran bi-weekly notifications today (prevent duplicate runs)
+    const lastNotificationDate = getLastBiWeeklyNotificationDate();
+    if (lastNotificationDate && lastNotificationDate.toDateString() === today.toDateString()) {
+      Logger.log(`Bi-weekly notifications already sent today (${today.toLocaleDateString()}). Skipping.`);
+      return;
+    }
+
+    Logger.log(`Running bi-weekly Monday notifications for ${today.toLocaleDateString()}`);
+    checkAndScheduleEventsWithTrigger('biWeekly');
+
+    // Update last notification date
+    setLastBiWeeklyNotificationDate(today);
+  } else {
+    Logger.log('Running daily scheduling check...');
+    checkAndScheduleEventsWithTrigger('daily');
   }
-
-  // Check if we already ran today (prevent duplicate runs)
-  const lastNotificationDate = getLastBiWeeklyNotificationDate();
-  if (lastNotificationDate && lastNotificationDate.toDateString() === today.toDateString()) {
-    Logger.log(`Bi-weekly notifications already sent today (${today.toLocaleDateString()}). Skipping.`);
-    return;
-  }
-
-  Logger.log(`Running bi-weekly Monday notifications for ${today.toLocaleDateString()}`);
-  checkAndScheduleEventsWithTrigger('biWeekly');
-
-  // Update last notification date
-  setLastBiWeeklyNotificationDate(today);
 }
 
 /**
  * ENHANCED MAIN FUNCTION: Modified checkAndScheduleEvents with trigger support
  * Now accepts a trigger type parameter to control processing window and notification behavior.
- * Maintains backward compatibility when called without parameters (defaults to 'monthly').
  */
 function checkAndScheduleEventsWithTrigger(triggerType = 'monthly') {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -895,7 +881,7 @@ function checkAndScheduleEventsWithTrigger(triggerType = 'monthly') {
 
   // Send consolidated notifications for each date with trigger type awareness
   if (Object.keys(notificationsByDate).length > 0) {
-    const notificationSent = sendGroupedDiscordNotificationsWithTrigger(notificationsByDate, playerInfo, triggerType);
+    const notificationSent = sendGroupedDiscordNotifications(notificationsByDate, playerInfo);
 
     if (notificationSent) {
       for (const week in eventsByWeek) {
@@ -943,3 +929,20 @@ function checkAndScheduleEventsWithTrigger(triggerType = 'monthly') {
     }
   }
 }
+
+/**
+ * Test function for bi-weekly mode
+ * This is a manual trigger function to test the bi-weekly scheduling logic.
+ */
+function testBiWeeklyMode() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Force the date to a known bi-weekly Monday for testing
+  // Comment out the next line to use the actual current date
+  // today.setDate(15);
+
+  Logger.log(`Testing bi-weekly mode for ${today.toLocaleDateString()}`);
+  checkAndScheduleEventsWithTrigger('biWeekly');
+}
+

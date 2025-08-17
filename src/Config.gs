@@ -38,15 +38,9 @@ const CONFIG = {
       enabled: true,
       daysAhead: 3,  // Start checking 3 days from Monday
       windowWeeks: 2,  // Check next 2 weeks
-      allowEventNotifications: false,  // Don't schedule events on bi-weekly
+      allowEventNotifications: true,  // Don't schedule events on bi-weekly
       allowReminders: true,  // Send reminders on bi-weekly
       allowDurationWarnings: true  // Send duration warnings on bi-weekly
-    },
-    monthly: {
-      enabled: true,  // Keep existing monthly system
-      allowEventNotifications: true,
-      allowReminders: true,
-      allowDurationWarnings: true
     }
   },
 
