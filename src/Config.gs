@@ -24,6 +24,32 @@ const CONFIG = {
   reminderThresholdPercentage: 0.4, // 40% of players must respond with Y before reminders are sent
   // Player combination threshold: percentage of players needed for event duration notification
   playerCombinationThresholdPercentage: 0.6, // 60% of players must be available for minimum event duration
+
+  // NEW: Trigger configuration
+  triggers: {
+    daily: {
+      enabled: true,
+      windowDays: 7,  // Check next 7 days for ready events
+      allowEventNotifications: true,  // Can send event scheduled notifications
+      allowReminders: false,  // Don't send reminders on daily
+      allowDurationWarnings: false  // Don't send duration warnings on daily
+    },
+    biWeekly: {
+      enabled: true,
+      daysAhead: 3,  // Start checking 3 days from Monday
+      windowWeeks: 2,  // Check next 2 weeks
+      allowEventNotifications: false,  // Don't schedule events on bi-weekly
+      allowReminders: true,  // Send reminders on bi-weekly
+      allowDurationWarnings: true  // Send duration warnings on bi-weekly
+    },
+    monthly: {
+      enabled: true,  // Keep existing monthly system
+      allowEventNotifications: true,
+      allowReminders: true,
+      allowDurationWarnings: true
+    }
+  },
+
   // Discord webhook configuration
   discordWebhookUrl: PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK'), // Add your Discord webhook URL here (e.g., "https://discord.com/api/webhooks/...")
   discordChannelMention: "@everyone", // Change to specific role mention if needed (e.g., "<@&ROLE_ID>")

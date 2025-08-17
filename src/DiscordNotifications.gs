@@ -5,15 +5,23 @@
 /**
  * Helper function to send Discord notifications for scheduled events.
  * Replaces the calendar event creation functionality.
+ * Now respects trigger-based notification controls.
  */
-function sendDiscordEventNotification(date, start, end, eventTitle, eventLink) {
+function sendDiscordEventNotification(date, start, end, eventTitle, eventLink, triggerType = 'monthly') {
+  // Check if this trigger type is allowed to send event notifications
+  const triggerConfig = CONFIG.triggers[triggerType];
+  if (!triggerConfig || !triggerConfig.allowEventNotifications) {
+    Logger.log(`Event notifications disabled for trigger type: ${triggerType}`);
+    return false;
+  }
+
   try {
     const webhookUrl = CONFIG.discordWebhookUrl;
     const channelMention = CONFIG.discordChannelMention;
 
     if (!webhookUrl) {
       Logger.log(`Discord webhook URL is not set. Skipping event notification.`);
-      return;
+      return false;
     }
 
     const eventDate = date.toLocaleDateString();
@@ -40,16 +48,26 @@ function sendDiscordEventNotification(date, start, end, eventTitle, eventLink) {
     };
 
     UrlFetchApp.fetch(webhookUrl, options);
-    Logger.log(`Discord event notification sent: ${fullEventTitle}`);
+    Logger.log(`Discord event notification sent: ${fullEventTitle} (trigger: ${triggerType})`);
+    return true;
   } catch (error) {
     Logger.log(`Error sending Discord event notification: ${error.toString()}`);
+    return false;
   }
 }
 
 /**
  * Send Discord reminder notifications to players who haven't responded
+ * Now respects trigger-based notification controls.
  */
-function sendDiscordReminder(reminderEmails, reminderType = 'mixed') {
+function sendDiscordReminder(reminderEmails, reminderType = 'mixed', triggerType = 'monthly') {
+  // Check if this trigger type is allowed to send reminders
+  const triggerConfig = CONFIG.triggers[triggerType];
+  if (!triggerConfig || !triggerConfig.allowReminders) {
+    Logger.log(`Reminder notifications disabled for trigger type: ${triggerType}`);
+    return false;
+  }
+
   try {
     const webhookUrl = CONFIG.discordWebhookUrl;
     const channelMention = CONFIG.discordChannelMention;
@@ -96,7 +114,7 @@ function sendDiscordReminder(reminderEmails, reminderType = 'mixed') {
     };
 
     UrlFetchApp.fetch(webhookUrl, options);
-    Logger.log(`Discord reminder (${reminderType}) sent to ${reminderEmails.size} participants: ${[...reminderEmails].join(', ')}`);
+    Logger.log(`Discord reminder (${reminderType}) sent to ${reminderEmails.size} participants: ${[...reminderEmails].join(', ')} (trigger: ${triggerType})`);
     return true;
   } catch (error) {
     Logger.log(`Error sending Discord reminder: ${error.toString()}`);
@@ -107,7 +125,14 @@ function sendDiscordReminder(reminderEmails, reminderType = 'mixed') {
 /**
  * Send Discord notification to players who are restricting event duration below threshold
  */
-function sendDiscordDurationRestrictionNotification(restrictingPlayers, eventDate, optimalDuration, playerInfo) {
+function sendDiscordDurationRestrictionNotification(restrictingPlayers, eventDate, optimalDuration, playerInfo, triggerType = 'monthly') {
+  // Check if this trigger type is allowed to send duration warnings
+  const triggerConfig = CONFIG.triggers[triggerType];
+  if (!triggerConfig || !triggerConfig.allowDurationWarnings) {
+    Logger.log(`Duration warning notifications disabled for trigger type: ${triggerType}`);
+    return false;
+  }
+
   try {
     const webhookUrl = CONFIG.discordWebhookUrl;
 
@@ -151,7 +176,7 @@ function sendDiscordDurationRestrictionNotification(restrictingPlayers, eventDat
     };
 
     UrlFetchApp.fetch(webhookUrl, options);
-    Logger.log(`Discord duration restriction notification sent to ${restrictingPlayers.length} players: ${restrictingPlayers.join(', ')}`);
+    Logger.log(`Discord duration restriction notification sent to ${restrictingPlayers.length} players: ${restrictingPlayers.join(', ')} (trigger: ${triggerType})`);
     return true;
   } catch (error) {
     Logger.log(`Error sending Discord duration restriction notification: ${error.toString()}`);
